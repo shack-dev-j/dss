@@ -9,8 +9,16 @@ import type { UserRole, UserSession } from "@/types";
 export const SESSION_COOKIE = "namps_session";
 export const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours, sliding
 
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
+/** Cost 12 for passwords people choose; imports use 10 for generated, one-time passwords (they must change them at first login). */
+export async function hashPassword(password: string, cost = 12): Promise<string> {
+  return bcrypt.hash(password, cost);
+}
+
+const TEMP_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export function generateTempPassword(length = 12): string {
+  let out = "";
+  for (let i = 0; i < length; i++) out += TEMP_ALPHABET[crypto.randomInt(TEMP_ALPHABET.length)];
+  return out;
 }
 
 export async function comparePassword(password: string, hash: string): Promise<boolean> {
@@ -94,6 +102,7 @@ export async function getSessionUser(req: Request): Promise<UserSession | null> 
     classId: row.classId ?? undefined,
     gradeLevel: row.gradeLevel ?? undefined,
     section: row.section ?? undefined,
+    mustChangePassword: row.user.mustChangePassword,
   };
 }
 

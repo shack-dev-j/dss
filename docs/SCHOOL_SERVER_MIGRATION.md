@@ -51,7 +51,7 @@ POSTGRES_DB=namps_production
 DATABASE_URL=postgresql://namps_admin:Use_A_Very_Strong_Password_Here_2026!@db:5432/namps_production
 
 # Cryptographic Keys (Generate with: openssl rand -hex 32)
-JWT_SECRET=generate_random_64_character_hex_string
+SESSION_SECRET=generate_random_64_character_hex_string
 ANONYMOUS_PEPPER=generate_another_random_64_character_hex_string
 
 # Disable demo mode for official school production

@@ -1,46 +1,29 @@
-# NamPS OS — Pilot & Interactive Demo Guide
+# NamPS OS — Pilot guide (one real week, one or two classes)
 
-## 1. Entering the Interactive Demonstration
-The public deployment operates with `DEMO MODE` enabled.
-- A prominent amber **DEMO REJIMI** badge is displayed on the top navigation bar.
-- Visitors can explore all 5 major school personas using the **Rolni almashtirish (Switch Role)** dropdown without needing separate login screens or passwords.
+Goal: find out what breaks or confuses people with **real** classes before the whole school uses it.
 
----
+## Before the week (administrator, ~half a day)
+1. Deploy following `docs/DEPLOYMENT.md`; finish its security checklist; run `./scripts/verify-restore.sh`.
+2. Enter terms, subjects, grading scale (get the school's decision: 5-point or percent, thresholds).
+3. Import the pilot classes' student lists (CSV), create the pilot teachers, appoint class teachers, connect teachers to subjects,
+   enter the weekly timetable. Print the one-time passwords and hand them out privately.
+4. 20-minute walkthrough with each pilot teacher: **attendance register**, **creating an assessment and entering marks** (aim: a full
+   class in under 1 minute), **posting homework**. Give students 5 minutes: login → change password → today's homework → marks.
 
-## 2. Role Walkthrough Scenarios
+## During the week — what to watch
+| Check | How |
+|---|---|
+| Every lesson's attendance is recorded the same day | Attendance → Class summary; export CSV on Friday |
+| Marks entry takes < 1 minute per class | Ask teachers; time one of them |
+| Students find today's homework in < 10 seconds | Watch two students do it |
+| Page loads feel instant on school Wi-Fi and phones | Test homework + marks on a phone in a classroom |
+| Nobody sees someone else's data | Each teacher/student confirms they only see their own classes |
+| Passwords/lockouts | Count "I can't log in" requests; reset via Users → Reset password |
+| Backups | Confirm `./backups` has one file per day and copy them off the server |
 
-### Scenario A: The Student Experience
-1. Select **O'quvchi (Student)** from the top role switcher (loads Azamat Toirov, 10-A).
-2. **Timetable**: View today's schedule (Monday 08:30 Math in Room 302, Physics in Lab 1, English in Room 204).
-3. **Assignments**: Open "Kengaytirilgan Matematika", view the already submitted solution with the teacher's published grade (**95/100**) and written praise.
-4. **Submit Work**: Select an ungraded assignment, type a response, and submit.
-5. **Workload Calendar**: Inspect the workload graph. Notice the warning on October 25 where multiple heavy deadlines coincide (>120 mins) and test the "Propose Reschedule" button.
+Keep a shared list of problems: *who, what screen, what they expected, what happened*. Fix blockers the same day.
 
-### Scenario B: Truly Anonymous Suggestion Workflow
-1. Navigate to **Anonim taklif yuborish** (works for any visitor without logging in).
-2. Select category (e.g. *Facilities & Equipment*), enter title and constructive text.
-3. Click **"Anonim tarzda yuborish"**.
-4. Observe the generated **Public Receipt Code** (e.g. `NPS-7K9W2B4X`) and **Secret Token** (`sec_...`). Copy them.
-5. Switch role to **Direktor (Director)** or **Menejer (Manager)**.
-6. Open **"Anonim takliflar (Ko'rib chiqish)"**.
-7. Locate the new suggestion in the queue. Note that **NO author name, email, or IP address** appears anywhere.
-8. Change status to `Approved` or `In Progress`, enter an official response, and save.
-9. Return to the anonymous status page, enter the receipt code and secret token, and verify that the student can immediately see the updated status and official response!
-
-### Scenario C: The Teacher Experience
-1. Switch to **O'qituvchi (Teacher)** (loads Jasur Rahimov).
-2. Click **Vazifalar va baholash** -> **Yangi vazifa yaratish** (Create Assignment).
-3. Enter title, due date, estimated completion time (mins), and instructions.
-4. Open the student submission queue, review Azamat's homework, adjust grade or write feedback, and publish.
-5. Open **Davomat daftari** (Attendance ledger), change a student status to `Late` or `Excused`, and click **Saqlash** (Save).
-
-### Scenario D: The Parent / Guardian Experience
-1. Switch to **Ota-ona (Parent)** (loads Farhod Toirov).
-2. Observe verified child linkage to Azamat Toirov (10-A).
-3. View child's academic GPA, attendance rate (97.5%), recent published grades, and upcoming deadlines.
-4. Confirm that no other students' records or anonymous suggestions are accessible.
-
-### Scenario E: Safe Demo Reset
-- Click the red **"Demoning holatini tiklash"** button in the top bar.
-- Confirm the dialog.
-- The system resets all fictional data back to its pristine seed state without affecting system stability.
+## End of the week
+- Export grades and attendance CSV for the pilot classes and compare with the paper registers: they must match.
+- Decide: ready for the whole school? What must change first? (Open questions for the school are in `docs/V1_PLAN.md` §6.)
+- Remove the pilot data or keep it: the school decides. Never keep demo/test accounts with known passwords on the live system.

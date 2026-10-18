@@ -26,6 +26,7 @@ export const users = pgTable("users", {
   role: varchar("role", { length: 20 }).notNull(),
   passwordHash: text("password_hash").notNull(),
   active: boolean("active").default(true).notNull(),
+  mustChangePassword: boolean("must_change_password").default(false).notNull(),
   createdAt: createdAt(),
 });
 
@@ -238,6 +239,14 @@ export const homeworkDone = pgTable(
   },
   (t) => [unique().on(t.homeworkId, t.studentId)]
 );
+
+// Small key/value store for school-wide settings (e.g. grading scale).
+export const settings = pgTable("settings", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedBy: text("updated_by").references(() => users.id),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 export const auditLog = pgTable("audit_log", {
   id: id(),

@@ -40,3 +40,17 @@ Scope source of truth: `docs/V1_PLAN.md` (`.ai/TASKS.md` and `.ai/STATE.md` are 
   **Not verified:** the new screens in a browser; Docker (uploads volume added to compose, untested).
 - **Leftovers:** `scripts/backup.sh` does not yet include the uploads folder (M5); attendance dates are not checked against the
   slot's weekday; no virus scan on uploads; teachers can't request a backdate approval in-app (the admin approves on request).
+
+## M5 — Admin, export, backups, deployment: done on `feat/m5-admin` (2026-10-18)
+- **Done:** admin screens (users: create/deactivate/role/class/reset; school setup: classes, class teachers, subjects, who teaches
+  what, timetable with no double-booking, terms, grading scale; class-list CSV import with dry run and one-time passwords;
+  reports: grades + attendance CSV, role-scoped). Generated/reset passwords force a change at first login. Courses/slots that
+  hold marks or attendance cannot be deleted. First admin from `BOOTSTRAP_ADMIN_*` on an empty DB. Production compose: Caddy
+  HTTPS, internal-only app/db, healthchecks, daily backup job, `restore.sh`, `verify-restore.sh`. `docs/DEPLOYMENT.md`, `docs/PILOT_GUIDE.md`.
+- **Tests:** 94, and the whole suite passes on **real PostgreSQL 18** (`TEST_DATABASE_URL=... vitest --no-file-parallelism`);
+  CI now has a Postgres job too. A real `next start` on Postgres: migrate-on-start → bootstrap admin → forced password change → admin API.
+- **Not verified:** `pg_dump`/restore scripts and the backup container (no `pg_dump` and no Docker daemon here; only `sh -n` and
+  `docker compose config` ran) — **run `./scripts/verify-restore.sh` on the server before the pilot**, as the plan's definition of
+  done requires. Caddy/Let's Encrypt, the screens in a browser, a real GitHub Actions run of the new Postgres job.
+- **Leftovers:** CSV export only (no .xlsx; Excel opens the UTF-8 CSV); teacher import not supported (users are added in the UI);
+  no UI to change a username; parent accounts/guardian links are still v2; login throttle is per process.

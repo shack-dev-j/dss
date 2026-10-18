@@ -16,6 +16,6 @@
 - Secret tokens are verified via timing-safe cryptographic comparisons (`crypto.timingSafeEqual`).
 
 ## 4. Secret Management & Portability
-- Environment variables (`.env`) control all secrets (`JWT_SECRET`, `ANONYMOUS_PEPPER`, `DATABASE_URL`).
+- Environment variables (`.env`) control all secrets (`SESSION_SECRET`, `ANONYMOUS_PEPPER`, `DATABASE_URL`).
 - `.env` and `.env.local` are strictly excluded via `.gitignore`.
 - `.env.example` provides sanitized template values with explicit instructions.

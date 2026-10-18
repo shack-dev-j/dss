@@ -44,7 +44,7 @@ class DataRepository {
   }
 
   public async setPasswordHash(userId: string, passwordHash: string) {
-    await getDb().update(t.users).set({ passwordHash }).where(eq(t.users.id, userId));
+    await getDb().update(t.users).set({ passwordHash, mustChangePassword: false }).where(eq(t.users.id, userId));
   }
 
   // --- Timetable ---

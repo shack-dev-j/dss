@@ -50,7 +50,7 @@ describe("Authentication: every route requires a session", () => {
   const routeModules = (import.meta as unknown as {
     glob: (p: string) => Record<string, () => Promise<unknown>>;
   }).glob("../src/app/api/**/route.ts");
-  const PUBLIC = ["auth/login", "auth/demo-login"];
+  const PUBLIC = ["auth/login", "auth/demo-login", "health"];
 
   it("discovers the route files", () => {
     expect(Object.keys(routeModules).length).toBeGreaterThan(15);
@@ -149,9 +149,17 @@ describe("Login, sessions and logout", () => {
     );
     expect(reset.status).toBe(200);
     expect((await me.GET(req("GET", "/api/auth/me", { cookie: student }))).status).toBe(401);
-    await loginAs("azamat.toirov", "reset-by-admin-1");
+    const pending = await loginAs("azamat.toirov", "reset-by-admin-1");
+    // after an admin reset the user must choose their own password before using anything else
+    const blocked = await call(marks.GET, "GET", "/api/marks", { cookie: pending });
+    expect(blocked.status).toBe(403);
+    expect((await blocked.json()).code).toBe("PASSWORD_CHANGE_REQUIRED");
+    const chosen = await call(password.POST, "POST", "/api/auth/password", { cookie: pending, body: { currentPassword: "reset-by-admin-1", newPassword: "my-own-password-1" } });
+    expect(chosen.status).toBe(200);
+    const fresh = chosen.headers.get("set-cookie")!.split(";")[0];
+    expect((await call(marks.GET, "GET", "/api/marks", { cookie: fresh })).status).toBe(200);
     const asStudent = await (adminPassword.POST as unknown as Handler)(
-      req("POST", "/api/admin/users/usr-stu-02/password", { cookie: await loginAs("azamat.toirov", "reset-by-admin-1"), body: { newPassword: "hacked-password-1" } }),
+      req("POST", "/api/admin/users/usr-stu-02/password", { cookie: fresh, body: { newPassword: "hacked-password-1" } }),
       { params: Promise.resolve({ id: "usr-stu-02" }) } as never
     );
     expect(asStudent.status).toBe(403);

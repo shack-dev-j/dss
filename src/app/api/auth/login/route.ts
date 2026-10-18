@@ -30,7 +30,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Parent accounts are not enabled yet" }, { status: 403 });
     }
     const { token, expiresAt } = await createSession(user.id);
-    const res = NextResponse.json({ user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role } });
+    const res = NextResponse.json({ user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role, mustChangePassword: user.mustChangePassword } });
     res.headers.append("Set-Cookie", sessionCookie(token, expiresAt));
     return res;
   } catch (e) {

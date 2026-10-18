@@ -8,6 +8,8 @@ import { useI18n } from "@/i18n/context";
 import { AccountModule } from "@/components/modules/AccountModule";
 import { HomeworkModule } from "@/components/modules/HomeworkModule";
 import { MarksModule } from "@/components/modules/MarksModule";
+import { SetupModule } from "@/components/modules/SetupModule";
+import { ReportsModule } from "@/components/modules/ReportsModule";
 import { UsersModule } from "@/components/modules/UsersModule";
 import { LoginScreen } from "@/components/LoginScreen";
 
@@ -55,6 +57,12 @@ export default function Home() {
 
       case "marks":
         return role === "student" || role === "teacher" || role === "admin" ? <MarksModule /> : <StudentDashboardModule onNavigate={(tab) => setActiveTab(tab)} />;
+
+      case "setup":
+        return role === "admin" ? <SetupModule /> : <StudentDashboardModule onNavigate={(tab) => setActiveTab(tab)} />;
+
+      case "reports":
+        return role === "admin" || role === "teacher" ? <ReportsModule /> : <StudentDashboardModule onNavigate={(tab) => setActiveTab(tab)} />;
 
       case "account":
         return <AccountModule />;
@@ -112,6 +120,19 @@ export default function Home() {
   if (isLoading) return <div className="min-h-screen bg-slate-50 dark:bg-slate-950" />;
   if (!user) return <LoginScreen />;
 
+  // After an import / admin reset the user must choose their own password before anything else.
+  if (user.mustChangePassword) {
+    return (
+      <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950">
+        <Navbar />
+        <main className="max-w-md w-full mx-auto p-6 space-y-4">
+          <p role="alert" className="text-sm rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-amber-800 dark:text-amber-300 p-3">{t.admin.mustChangeBanner}</p>
+          <AccountModule />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950">
       <Navbar />
@@ -130,6 +151,8 @@ export default function Home() {
               <option value="dashboard">{t.nav.dashboard}</option>
               <option value="homework">{t.homework.title}</option>
               <option value="marks">{t.marks.title}</option>
+              {role === "admin" && <option value="setup">{t.admin.setup}</option>}
+              {(role === "admin" || role === "teacher") && <option value="reports">{t.admin.reports}</option>}
               <option value="account">{t.auth.account}</option>
               {role === "admin" && <option value="users">{t.nav.userManagement}</option>}
               <option value="timetable">{t.nav.timetable}</option>

@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useI18n } from "@/i18n/context";
 
 export function AccountModule() {
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
   const { t } = useI18n();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -23,6 +23,7 @@ export function AccountModule() {
     if (res.ok) {
       setCurrent("");
       setNext("");
+      await refresh(); // clears the "must change password" gate
     }
   };
 

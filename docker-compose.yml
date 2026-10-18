@@ -1,31 +1,28 @@
-version: "3.8"
+# NamPS OS production stack: Caddy (HTTPS) -> app (Next.js) -> PostgreSQL, plus a daily backup job.
+# Only Caddy publishes ports; the app and the database are reachable only inside the compose network.
+# Configure with a .env file next to this one (see .env.production.example). Secrets have no defaults on purpose.
 
 services:
   db:
     image: postgres:16-alpine
-    container_name: namps_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-namps_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-namps_secure_password_2026}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-namps_os}
-    ports:
-      - "5432:5432"
     volumes:
       - namps_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-namps_user} -d ${POSTGRES_DB:-namps_os}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - namps_network
+    networks: [namps_network]
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: namps_app
     restart: unless-stopped
     depends_on:
       db:
@@ -33,26 +30,72 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-namps_user}:${POSTGRES_PASSWORD:-namps_secure_password_2026}@db:5432/${POSTGRES_DB:-namps_os}
-      # No defaults for secrets: compose refuses to start without them (fail closed).
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER:-namps_user}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-namps_os}
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (>= 32 random chars)}
       ANONYMOUS_PEPPER: ${ANONYMOUS_PEPPER:?set ANONYMOUS_PEPPER (>= 16 random chars)}
       MIGRATE_ON_START: "true"
+      # Only used while the database has no users; remove after the first login.
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-}
       DEMO_MODE: ${DEMO_MODE:-false}
       FEATURES: ${FEATURES:-}
       UPLOAD_DIR: /app/uploads
     volumes:
       - namps_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks: [namps_network]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      CADDY_TLS: ${CADDY_TLS:-}
     ports:
-      - "3000:3000"
-    networks:
-      - namps_network
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [namps_network]
+
+  # Daily pg_dump + uploads archive into ./backups (keep ./backups on a different disk or machine too!).
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["sh", "/scripts/backup-loop.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-namps_user}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-namps_os}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-21}   # 21:00 UTC = 02:00 in Tashkent
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./backups:/backups
+      - namps_uploads:/uploads:ro
+    networks: [namps_network]
 
 volumes:
   namps_pgdata:
-    driver: local
   namps_uploads:
-    driver: local
+  caddy_data:
+  caddy_config:
 
 networks:
   namps_network:

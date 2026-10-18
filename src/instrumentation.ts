@@ -7,6 +7,8 @@ export async function register() {
     if (process.env.MIGRATE_ON_START === "true") {
       const { runMigrations } = await import("@/db/client");
       await runMigrations();
+      const { bootstrapAdmin } = await import("@/db/bootstrap");
+      await bootstrapAdmin();
     }
   }
 }

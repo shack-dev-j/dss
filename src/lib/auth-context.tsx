@@ -14,6 +14,7 @@ interface AuthContextType {
   hasTab: (tab: string) => boolean;
   signIn: (username: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
+  refresh: () => Promise<void>;
   /** Demo mode only: start a real server session as the seeded demo user of that role. */
   switchRole: (role: UserRole) => Promise<void>;
 }
@@ -94,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         hasTab,
         signIn,
         signOut,
+        refresh,
         switchRole,
       }}
     >

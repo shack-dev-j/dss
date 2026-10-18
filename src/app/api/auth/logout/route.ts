@@ -8,4 +8,4 @@ export const POST = withAuth(async (req) => {
   const res = NextResponse.json({ success: true });
   res.headers.append("Set-Cookie", clearedSessionCookie());
   return res;
-});
+}, { allowPasswordChangePending: true });

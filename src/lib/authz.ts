@@ -6,11 +6,8 @@ import { getSessionUser } from "@/lib/auth";
 import { ConfigError, FeatureName, isDemoMode, isFeatureEnabled } from "@/lib/env";
 import type { UserRole, UserSession } from "@/types";
 
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+import { HttpError } from "@/lib/errors";
+export { HttpError };
 
 export const forbidden = (msg = "Forbidden") => new HttpError(403, msg);
 export const notFound = (msg = "Not found") => new HttpError(404, msg);
@@ -23,6 +20,8 @@ interface Options {
   feature?: FeatureName | FeatureName[];
   /** Route only exists when DEMO_MODE=true (else 404). */
   demoOnly?: boolean;
+  /** Usable while the user still has to choose a new password (login, logout, change password). */
+  allowPasswordChangePending?: boolean;
 }
 
 type Handler<C> = (req: Request, user: UserSession, ctx: C) => Promise<Response>;
@@ -37,6 +36,9 @@ export function withAuth<C = unknown>(handler: Handler<C>, opts: Options = {}) {
     try {
       const user = await getSessionUser(req);
       if (!user) return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+      if (user.mustChangePassword && !opts.allowPasswordChangePending) {
+        return NextResponse.json({ error: "Password change required", code: "PASSWORD_CHANGE_REQUIRED" }, { status: 403 });
+      }
       if (opts.demoOnly && !isDemoMode()) return NextResponse.json({ error: "Not found" }, { status: 404 });
       if (opts.feature) {
         const list = Array.isArray(opts.feature) ? opts.feature : [opts.feature];

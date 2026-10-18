@@ -17,4 +17,4 @@ export const POST = withAuth(async (req, user) => {
   const res = NextResponse.json({ success: true });
   res.headers.append("Set-Cookie", sessionCookie(token, expiresAt));
   return res;
-});
+}, { allowPasswordChangePending: true });

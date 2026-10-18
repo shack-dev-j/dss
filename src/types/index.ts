@@ -8,6 +8,7 @@ export interface UserSession {
   classId?: string;    // students
   gradeLevel?: number; // students
   section?: string;    // students, e.g. "A"
+  mustChangePassword?: boolean; // set by import / admin reset until the user picks their own password
 }
 
 export type SuggestionStatus =

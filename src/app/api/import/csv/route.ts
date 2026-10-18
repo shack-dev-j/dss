@@ -1,90 +1,57 @@
 import { NextResponse } from "next/server";
-import { readJson, withAuth } from "@/lib/authz";
+import { generateTempPassword, hashPassword } from "@/lib/auth";
+import { badRequest, readJson, withAuth } from "@/lib/authz";
+import { parseCsv, toCsv } from "@/lib/csv";
+import { className, ImportRow, importStudents, validateStudentImport } from "@/db/admin";
 
-export const POST = withAuth(async (req) => {
-  {
-    const body = await readJson(req);
-    const { entityType, csvContent, isDryRun } = body as { entityType?: string; csvContent?: string; isDryRun?: boolean };
+const MAX_ROWS = 600;
 
-    if (!entityType || !csvContent) {
-      return NextResponse.json({ error: "entityType and csvContent are required." }, { status: 400 });
+// Class-list import. Columns (header row required): fullName, username, gradeLevel, section, [password].
+// isDryRun=true validates and previews; otherwise it imports everything or nothing and returns the
+// one-time passwords (shown once; every imported student must change theirs at first login).
+export const POST = withAuth(
+  async (req, user) => {
+    const b = await readJson(req);
+    const csvContent = typeof b.csvContent === "string" ? b.csvContent : "";
+    if (b.entityType !== "students") throw badRequest('Only entityType "students" can be imported');
+    const table = parseCsv(csvContent);
+    if (table.length < 2) throw badRequest("The file needs a header row and at least one student");
+    if (table.length - 1 > MAX_ROWS) throw badRequest(`At most ${MAX_ROWS} students per file`);
+
+    const headers = table[0].map((h) => h.toLowerCase().replace(/[\s_]/g, ""));
+    const col = (name: string) => headers.indexOf(name);
+    const missing = ["fullname", "username", "gradelevel", "section"].filter((h) => col(h) < 0);
+    if (missing.length) throw badRequest(`Missing columns: ${missing.join(", ")}`);
+
+    const rows: ImportRow[] = table.slice(1).map((r) => ({
+      fullName: r[col("fullname")] ?? "",
+      username: (r[col("username")] ?? "").toLowerCase(),
+      gradeLevel: Number(r[col("gradelevel")]),
+      section: r[col("section")] ?? "",
+      password: col("password") >= 0 ? r[col("password")] : undefined,
+    }));
+
+    const errors = await validateStudentImport(rows);
+    if (errors.length) {
+      return NextResponse.json({ success: false, totalRows: rows.length, errors: errors.slice(0, 50), moreErrors: Math.max(0, errors.length - 50) }, { status: 422 });
     }
-
-    // Parse CSV lines
-    const lines = csvContent.trim().split("\n").map((l: string) => l.trim()).filter(Boolean);
-    if (lines.length < 2) {
-      return NextResponse.json({ error: "CSV file must contain a header row and at least one data row." }, { status: 400 });
-    }
-
-    const headers = lines[0].split(",").map((h: string) => h.trim().toLowerCase());
-    const rows = lines.slice(1).map((line: string) => line.split(",").map((c: string) => c.trim()));
-
-    // Schema validations based on entityType
-    const validationErrors: string[] = [];
-    const parsedRecords: any[] = [];
-
-    if (entityType === "students") {
-      const required = ["fullname", "email", "gradelevel", "section"];
-      const missing = required.filter((r) => !headers.includes(r));
-      if (missing.length > 0) {
-        return NextResponse.json({ error: `Missing required CSV headers: ${missing.join(", ")}` }, { status: 400 });
-      }
-
-      rows.forEach((row: string[], idx: number) => {
-        const rowObj: any = {};
-        headers.forEach((h: string, i: number) => {
-          rowObj[h] = row[i];
-        });
-
-        if (!rowObj.fullname || !rowObj.email) {
-          validationErrors.push(`Row ${idx + 2}: Full name and Email are required.`);
-        }
-        const grade = parseInt(rowObj.gradelevel);
-        if (isNaN(grade) || grade < 5 || grade > 11) {
-          validationErrors.push(`Row ${idx + 2}: Grade level must be between 5 and 11.`);
-        }
-
-        parsedRecords.push(rowObj);
-      });
-    } else {
-      rows.forEach((row: string[]) => {
-        const rowObj: any = {};
-        headers.forEach((h: string, i: number) => {
-          rowObj[h] = row[i];
-        });
-        parsedRecords.push(rowObj);
-      });
-    }
-
-    if (validationErrors.length > 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          totalRows: rows.length,
-          validRows: rows.length - validationErrors.length,
-          errors: validationErrors,
-        },
-        { status: 422 }
-      );
-    }
-
-    if (isDryRun) {
+    if (b.isDryRun) {
       return NextResponse.json({
-        success: true,
-        isDryRun: true,
-        totalRows: rows.length,
-        preview: parsedRecords.slice(0, 5),
-        message: "Dry run validation succeeded. All rows match target schema.",
+        success: true, isDryRun: true, totalRows: rows.length,
+        classes: [...new Set(rows.map((r) => className(r.gradeLevel, r.section)))].sort(),
+        preview: rows.slice(0, 5).map(({ password, ...r }) => { void password; return r; }),
       });
     }
 
-    // Live import execution summary
-    return NextResponse.json({
-      success: true,
-      isDryRun: false,
-      importedCount: parsedRecords.length,
-      entityType,
-      message: `Successfully imported ${parsedRecords.length} ${entityType} records into NamPS OS.`,
-    });
-  }
-}, { roles: ["admin"] });
+    const hashes = new Map<string, string>();
+    const credentials: string[][] = [["fullName", "username", "class", "temporaryPassword"]];
+    for (const r of rows) {
+      const password = r.password || generateTempPassword();
+      hashes.set(r.username, await hashPassword(password, r.password ? 12 : 10));
+      credentials.push([r.fullName, r.username, className(r.gradeLevel, r.section), r.password ? "(set in file)" : password]);
+    }
+    const result = await importStudents(rows, hashes, user.id);
+    return NextResponse.json({ success: true, isDryRun: false, ...result, credentialsCsv: toCsv(credentials) });
+  },
+  { roles: ["admin"] }
+);

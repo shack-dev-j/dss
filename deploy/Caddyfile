@@ -1,0 +1,18 @@
+# DOMAIN=school.example.uz       -> Caddy gets a free Let's Encrypt certificate automatically (ports 80/443 must be reachable).
+# DOMAIN=localhost or a LAN name -> set CADDY_TLS="tls internal" for a certificate from Caddy's own CA
+#                                   (browsers show a warning until the CA in the caddy_data volume is trusted).
+{$DOMAIN:localhost} {
+	{$CADDY_TLS:}
+	encode gzip
+	request_body {
+		max_size 8MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+	reverse_proxy app:3000
+}
