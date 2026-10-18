@@ -484,6 +484,196 @@ class DataRepository {
     return true;
   }
 
+  // --- Attendance register, approvals, summary (M3) ---
+  /** Every student of the class with their saved status for this lesson (null = not recorded yet). */
+  public async getRegister(slotId: string, date: string, classId: string) {
+    return getDb()
+      .select({
+        studentId: t.students.userId,
+        studentName: t.users.fullName,
+        status: t.attendance.status,
+        notes: t.attendance.notes,
+      })
+      .from(t.students)
+      .innerJoin(t.users, eq(t.users.id, t.students.userId))
+      .leftJoin(
+        t.attendance,
+        and(eq(t.attendance.studentId, t.students.userId), eq(t.attendance.slotId, slotId), eq(t.attendance.date, date))
+      )
+      .where(eq(t.students.classId, classId))
+      .orderBy(t.users.fullName);
+  }
+
+  public async hasBackdateApproval(slotId: string, date: string) {
+    const [r] = await getDb()
+      .select({ id: t.attendanceBackdateApprovals.id })
+      .from(t.attendanceBackdateApprovals)
+      .where(and(eq(t.attendanceBackdateApprovals.slotId, slotId), eq(t.attendanceBackdateApprovals.date, date)));
+    return !!r;
+  }
+
+  public async createBackdateApproval(slotId: string, date: string, approvedBy: string, reason?: string) {
+    return getDb().transaction(async (tx) => {
+      const [row] = await tx
+        .insert(t.attendanceBackdateApprovals)
+        .values({ slotId, date, approvedBy, reason: reason ?? null })
+        .onConflictDoUpdate({
+          target: [t.attendanceBackdateApprovals.slotId, t.attendanceBackdateApprovals.date],
+          set: { approvedBy, reason: reason ?? null },
+        })
+        .returning();
+      await tx.insert(t.auditLog).values({
+        userId: approvedBy, action: "attendance.backdate_approve", entity: "attendance_slot", entityId: slotId,
+        newValue: { date, reason: reason ?? null },
+      });
+      return { ...row, createdAt: row.createdAt.toISOString() };
+    });
+  }
+
+  public async listBackdateApprovals() {
+    const rows = await getDb().select().from(t.attendanceBackdateApprovals).orderBy(desc(t.attendanceBackdateApprovals.createdAt));
+    return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+  }
+
+  public async getSlotById(slotId: string) {
+    const [r] = await this.slotQuery().where(eq(t.timetableSlots.id, slotId));
+    return r ?? null;
+  }
+
+  /** Classes a user is class teacher of (admin: all classes). */
+  public async getClassesForClassTeacher(teacherId?: string) {
+    return getDb()
+      .select({ id: t.classes.id, name: t.classes.name })
+      .from(t.classes)
+      .where(teacherId ? eq(t.classes.classTeacherId, teacherId) : undefined)
+      .orderBy(t.classes.name);
+  }
+
+  public async isClassTeacher(teacherId: string, classId: string) {
+    const [r] = await getDb()
+      .select({ id: t.classes.id })
+      .from(t.classes)
+      .where(and(eq(t.classes.id, classId), eq(t.classes.classTeacherId, teacherId)));
+    return !!r;
+  }
+
+  /**
+   * Per-student counts for one class over a date range. Rate = (present + late) /
+   * (recorded lessons - excused), i.e. excused absences do not count against the student.
+   */
+  public async getClassAttendanceSummary(classId: string, from: string, to: string) {
+    const rows = await getDb()
+      .select({
+        studentId: t.students.userId,
+        studentName: t.users.fullName,
+        status: t.attendance.status,
+        n: sql<number>`count(${t.attendance.id})::int`,
+      })
+      .from(t.students)
+      .innerJoin(t.users, eq(t.users.id, t.students.userId))
+      .leftJoin(
+        t.attendance,
+        and(
+          eq(t.attendance.studentId, t.students.userId),
+          sql`${t.attendance.date} >= ${from}`,
+          sql`${t.attendance.date} <= ${to}`,
+          sql`${t.attendance.slotId} in (select ${t.timetableSlots.id} from ${t.timetableSlots}
+              join ${t.teacherAssignments} on ${t.teacherAssignments.id} = ${t.timetableSlots.teacherAssignmentId}
+              where ${t.teacherAssignments.classId} = ${classId})`
+        )
+      )
+      .where(eq(t.students.classId, classId))
+      .groupBy(t.students.userId, t.users.fullName, t.attendance.status);
+    const byStudent = new Map<string, { studentId: string; studentName: string; present: number; absent: number; late: number; excused: number }>();
+    for (const r of rows) {
+      const s = byStudent.get(r.studentId) ?? { studentId: r.studentId, studentName: r.studentName, present: 0, absent: 0, late: 0, excused: 0 };
+      if (r.status === "present" || r.status === "absent" || r.status === "late" || r.status === "excused") s[r.status] += r.n;
+      byStudent.set(r.studentId, s);
+    }
+    return [...byStudent.values()]
+      .map((s) => {
+        const counted = s.present + s.absent + s.late;
+        return { ...s, rate: counted ? Math.round(((s.present + s.late) / counted) * 1000) / 10 : null };
+      })
+      .sort((a, b) => a.studentName.localeCompare(b.studentName));
+  }
+
+  // --- Homework (M3) ---
+  private homeworkQuery(studentId?: string) {
+    return getDb()
+      .select({
+        id: t.homework.id,
+        courseId: t.homework.teacherAssignmentId,
+        classId: t.teacherAssignments.classId,
+        className: t.classes.name,
+        subjectName: t.subjects.nameUz,
+        teacherId: t.teacherAssignments.teacherId,
+        teacherName: t.users.fullName,
+        description: t.homework.description,
+        dueDate: t.homework.dueDate,
+        attachmentName: t.homework.attachmentName,
+        attachmentFile: t.homework.attachmentFile,
+        postedBy: t.homework.postedBy,
+        createdAt: t.homework.createdAt,
+        done: studentId
+          ? sql<boolean>`exists (select 1 from ${t.homeworkDone} d where d.homework_id = ${t.homework.id} and d.student_id = ${studentId})`
+          : sql<boolean>`false`,
+      })
+      .from(t.homework)
+      .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.homework.teacherAssignmentId))
+      .innerJoin(t.classes, eq(t.classes.id, t.teacherAssignments.classId))
+      .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+      .innerJoin(t.users, eq(t.users.id, t.teacherAssignments.teacherId));
+  }
+
+  private mapHomework<R extends { createdAt: Date; attachmentFile: string | null }>(r: R) {
+    const { attachmentFile, ...rest } = r;
+    return { ...rest, createdAt: r.createdAt.toISOString(), hasAttachment: !!attachmentFile };
+  }
+
+  public async getHomework(filter: { classId?: string; teacherId?: string; fromDate?: string; studentId?: string }) {
+    const conds = [];
+    if (filter.classId) conds.push(eq(t.teacherAssignments.classId, filter.classId));
+    if (filter.teacherId) conds.push(eq(t.teacherAssignments.teacherId, filter.teacherId));
+    if (filter.fromDate) conds.push(sql`${t.homework.dueDate} >= ${filter.fromDate}`);
+    const rows = await this.homeworkQuery(filter.studentId)
+      .where(conds.length ? and(...conds) : undefined)
+      .orderBy(t.homework.dueDate, t.homework.createdAt);
+    return rows.map((r) => this.mapHomework(r));
+  }
+
+  /** Raw row (includes the stored file name) for download/delete. */
+  public async getHomeworkById(id: string, studentId?: string) {
+    const [r] = await this.homeworkQuery(studentId).where(eq(t.homework.id, id));
+    return r ?? null;
+  }
+
+  public async createHomework(data: {
+    courseId: string; description: string; dueDate: string; postedBy: string;
+    attachmentFile?: string | null; attachmentName?: string | null;
+  }) {
+    const [row] = await getDb()
+      .insert(t.homework)
+      .values({
+        teacherAssignmentId: data.courseId, description: data.description, dueDate: data.dueDate,
+        postedBy: data.postedBy, attachmentFile: data.attachmentFile ?? null, attachmentName: data.attachmentName ?? null,
+      })
+      .returning({ id: t.homework.id });
+    return this.mapHomework((await this.getHomeworkById(row.id))!);
+  }
+
+  public async deleteHomework(id: string) {
+    await getDb().delete(t.homework).where(eq(t.homework.id, id));
+  }
+
+  public async setHomeworkDone(homeworkId: string, studentId: string, done: boolean) {
+    if (done) {
+      await getDb().insert(t.homeworkDone).values({ homeworkId, studentId }).onConflictDoNothing();
+    } else {
+      await getDb().delete(t.homeworkDone).where(and(eq(t.homeworkDone.homeworkId, homeworkId), eq(t.homeworkDone.studentId, studentId)));
+    }
+  }
+
   // --- Truly Anonymous Suggestions (no user id is ever stored) ---
   public async submitAnonymousSuggestion(
     category: "academic" | "facilities" | "catering" | "events" | "general",

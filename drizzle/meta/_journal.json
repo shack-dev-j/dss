@@ -8,6 +8,13 @@
       "when": 1792268167718,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792310218578,
+      "tag": "0001_attendance_homework",
+      "breakpoints": true
     }
   ]
 }

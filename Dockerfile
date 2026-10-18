@@ -34,6 +34,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # SQL migrations (applied with `pnpm db:migrate`; see docs/V1_PLAN.md M5 for the deploy step)
 COPY --from=builder --chown=nextjs:nodejs /app/drizzle ./drizzle
 
+# Homework attachments live on a volume mounted here (UPLOAD_DIR); the app user must own it.
+RUN mkdir -p /app/uploads && chown nextjs:nodejs /app/uploads
+
 USER nextjs
 
 EXPOSE 3000

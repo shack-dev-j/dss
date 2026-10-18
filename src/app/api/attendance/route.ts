@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { assertCanSeeStudent, assertTeachesSlot, badRequest, forbidden, readJson, withAuth } from "@/lib/authz";
 import { db } from "@/db";
+import { assertLessonEditable } from "@/lib/attendance-rules";
+import { isValidDate } from "@/lib/dates";
 
 const STATUSES = ["present", "absent", "late", "excused"];
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const GET = withAuth(async (req, user) => {
   const sp = new URL(req.url).searchParams;
@@ -39,13 +40,19 @@ export const POST = withAuth(
       const studentId = String(r.studentId ?? "");
       const date = String(r.date ?? "");
       const status = String(r.status ?? "");
-      if (!slotId || !studentId || !DATE_RE.test(date) || !STATUSES.includes(status)) {
+      if (!slotId || !studentId || !isValidDate(date) || !STATUSES.includes(status)) {
         throw badRequest("Each record needs slotId, studentId, date (YYYY-MM-DD) and a valid status");
       }
       const { ta } = await assertTeachesSlot(user, slotId);
       if (!classMembers.has(ta.classId)) classMembers.set(ta.classId, new Set(await db.getStudentIdsInClass(ta.classId)));
       if (!classMembers.get(ta.classId)!.has(studentId)) throw badRequest("Student is not in this class");
       clean.push({ slotId, studentId, date, status, notes: typeof r.notes === "string" ? r.notes : undefined });
+    }
+    // Backdate window / future-date rule, once per distinct lesson in the batch.
+    const lessons = new Set(clean.map((r) => `${r.slotId}|${r.date}`));
+    for (const key of lessons) {
+      const [slotId, date] = key.split("|");
+      await assertLessonEditable(user, slotId, date);
     }
     await db.markAttendance(clean, user.id);
     return NextResponse.json({ success: true });

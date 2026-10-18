@@ -40,6 +40,9 @@ services:
       MIGRATE_ON_START: "true"
       DEMO_MODE: ${DEMO_MODE:-false}
       FEATURES: ${FEATURES:-}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - namps_uploads:/app/uploads
     ports:
       - "3000:3000"
     networks:
@@ -47,6 +50,8 @@ services:
 
 volumes:
   namps_pgdata:
+    driver: local
+  namps_uploads:
     driver: local
 
 networks:

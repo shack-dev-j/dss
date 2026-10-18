@@ -28,3 +28,15 @@ Scope source of truth: `docs/V1_PLAN.md` (`.ai/TASKS.md` and `.ai/STATE.md` are 
 - **Not verified:** the new screens in a real browser (the browser pane could not open the local server); Docker/Postgres.
 - **Leftovers:** grading scale (5-point vs 100-point) is not configurable yet, scores are plain points; no per-subject final grade
   or year transcript (M4); comments are plain text, one per mark.
+
+## M3 — Attendance and homework: done on `feat/m3-attendance-homework` (2026-10-18)
+- **Done:** attendance register per lesson (everyone present by default, tap to change, one Save); edits older than 7 days
+  (Asia/Tashkent) need an admin approval for that exact lesson, the future is rejected, admins are never blocked; whole-class
+  summary for the class teacher/admin; students see their own history and rate. Homework per class+subject with optional
+  attachment (local disk volume `UPLOAD_DIR`, 5 MB, pdf/png/jpg/txt/docx/xlsx/pptx, extension + magic-byte check, generated
+  file names, access-checked download), today's homework first then upcoming, "mark as done". Migration `0001`.
+- **Tests:** 70 total (18 new in `tests/attendance-homework.test.ts`; the test clock is fixed in `tests/setup.ts`).
+- **Verified:** typecheck, lint, build, and a real `next start` run (multipart upload, student download byte-identical, 401 without cookie).
+  **Not verified:** the new screens in a browser; Docker (uploads volume added to compose, untested).
+- **Leftovers:** `scripts/backup.sh` does not yet include the uploads folder (M5); attendance dates are not checked against the
+  slot's weekday; no virus scan on uploads; teachers can't request a backdate approval in-app (the admin approves on request).

@@ -198,6 +198,47 @@ export const attendance = pgTable(
   (t) => [unique().on(t.slotId, t.studentId, t.date)]
 );
 
+// An admin lets teachers edit one lesson's attendance after the 7-day window.
+export const attendanceBackdateApprovals = pgTable(
+  "attendance_backdate_approvals",
+  {
+    id: id(),
+    slotId: text("slot_id").references(() => timetableSlots.id, { onDelete: "cascade" }).notNull(),
+    date: varchar("date", { length: 10 }).notNull(),
+    approvedBy: text("approved_by").references(() => users.id).notNull(),
+    reason: text("reason"),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.slotId, t.date)]
+);
+
+// ---------------------------------------------------------------------------
+// Homework (class + subject, optional attachment stored on the local disk volume)
+// ---------------------------------------------------------------------------
+
+export const homework = pgTable("homework", {
+  id: id(),
+  teacherAssignmentId: text("teacher_assignment_id")
+    .references(() => teacherAssignments.id, { onDelete: "cascade" })
+    .notNull(),
+  description: text("description").notNull(),
+  dueDate: varchar("due_date", { length: 10 }).notNull(), // YYYY-MM-DD
+  attachmentFile: varchar("attachment_file", { length: 100 }), // generated name inside UPLOAD_DIR
+  attachmentName: varchar("attachment_name", { length: 255 }), // sanitized original name, for download
+  postedBy: text("posted_by").references(() => users.id).notNull(),
+  createdAt: createdAt(),
+});
+
+export const homeworkDone = pgTable(
+  "homework_done",
+  {
+    homeworkId: text("homework_id").references(() => homework.id, { onDelete: "cascade" }).notNull(),
+    studentId: text("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    doneAt: timestamp("done_at").defaultNow().notNull(),
+  },
+  (t) => [unique().on(t.homeworkId, t.studentId)]
+);
+
 export const auditLog = pgTable("audit_log", {
   id: id(),
   userId: text("user_id").references(() => users.id),
