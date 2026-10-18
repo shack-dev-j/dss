@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { assertCanSeeStudent, badRequest, isClassTeacherOf, withAuth } from "@/lib/authz";
 import { db } from "@/db";
+import { summarizeMarks } from "@/lib/marks";
 
-// Read-only for now (M2 adds the teacher grid). A student only ever sees their
+// Marks plus per-term averages. A student only ever sees their
 // own marks; a subject teacher sees only the marks for subjects they teach;
 // the class teacher and admins see everything for students they may see.
 export const GET = withAuth(async (req, user) => {
@@ -15,5 +16,5 @@ export const GET = withAuth(async (req, user) => {
     if (!(await isClassTeacherOf(user, studentId))) onlyTeacher = user.id;
   }
   const marks = await db.getMarksForStudent(studentId, onlyTeacher);
-  return NextResponse.json({ marks });
+  return NextResponse.json({ marks, summary: summarizeMarks(marks) });
 });

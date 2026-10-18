@@ -240,6 +240,8 @@ class DataRepository {
         type: t.assessments.type,
         date: t.assessments.date,
         termId: t.assessments.termId,
+        termName: t.terms.name,
+        subjectId: t.subjects.id,
         subjectName: t.subjects.nameUz,
         score: t.marks.score,
         maxScore: t.assessments.maxScore,
@@ -249,8 +251,176 @@ class DataRepository {
       .innerJoin(t.assessments, eq(t.assessments.id, t.marks.assessmentId))
       .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.assessments.teacherAssignmentId))
       .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+      .innerJoin(t.terms, eq(t.terms.id, t.assessments.termId))
       .where(and(...conds))
       .orderBy(t.assessments.date);
+  }
+
+  // --- Terms, courses, assessments (M2) ---
+  public async getTerms() {
+    return getDb().select().from(t.terms).orderBy(t.terms.startDate);
+  }
+
+  /** Terms of the academic year a course (class + subject) belongs to. */
+  public async getTermsForCourse(courseId: string) {
+    return getDb()
+      .select({ id: t.terms.id, yearId: t.terms.yearId, name: t.terms.name, startDate: t.terms.startDate, endDate: t.terms.endDate, closed: t.terms.closed })
+      .from(t.terms)
+      .innerJoin(t.classes, eq(t.classes.yearId, t.terms.yearId))
+      .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.classId, t.classes.id))
+      .where(eq(t.teacherAssignments.id, courseId))
+      .orderBy(t.terms.startDate);
+  }
+
+  public async getTermById(id: string) {
+    const [r] = await getDb().select().from(t.terms).where(eq(t.terms.id, id));
+    return r ?? null;
+  }
+
+  public async setTermClosed(id: string, closed: boolean, actorId: string) {
+    return getDb().transaction(async (tx) => {
+      const [old] = await tx.select().from(t.terms).where(eq(t.terms.id, id));
+      if (!old) return null;
+      const [row] = await tx.update(t.terms).set({ closed }).where(eq(t.terms.id, id)).returning();
+      await tx.insert(t.auditLog).values({
+        userId: actorId, action: closed ? "term.close" : "term.reopen", entity: "term", entityId: id,
+        oldValue: { closed: old.closed }, newValue: { closed },
+      });
+      return row;
+    });
+  }
+
+  /** Courses (class + subject) a teacher teaches; pass no teacherId for all (admin). */
+  public async getCourses(teacherId?: string) {
+    return getDb()
+      .select({
+        id: t.teacherAssignments.id,
+        teacherId: t.teacherAssignments.teacherId,
+        teacherName: t.users.fullName,
+        classId: t.classes.id,
+        className: t.classes.name,
+        subjectId: t.subjects.id,
+        subjectName: t.subjects.nameUz,
+      })
+      .from(t.teacherAssignments)
+      .innerJoin(t.classes, eq(t.classes.id, t.teacherAssignments.classId))
+      .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+      .innerJoin(t.users, eq(t.users.id, t.teacherAssignments.teacherId))
+      .where(teacherId ? eq(t.teacherAssignments.teacherId, teacherId) : undefined)
+      .orderBy(t.classes.name, t.subjects.nameUz);
+  }
+
+  private assessmentQuery() {
+    return getDb()
+      .select({
+        id: t.assessments.id,
+        courseId: t.assessments.teacherAssignmentId,
+        classId: t.teacherAssignments.classId,
+        termId: t.assessments.termId,
+        termClosed: t.terms.closed,
+        type: t.assessments.type,
+        title: t.assessments.title,
+        date: t.assessments.date,
+        maxScore: t.assessments.maxScore,
+      })
+      .from(t.assessments)
+      .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.assessments.teacherAssignmentId))
+      .innerJoin(t.terms, eq(t.terms.id, t.assessments.termId));
+  }
+
+  public async getAssessmentsForCourse(courseId: string) {
+    return this.assessmentQuery().where(eq(t.assessments.teacherAssignmentId, courseId)).orderBy(t.assessments.date);
+  }
+
+  public async getAssessmentById(id: string) {
+    const [r] = await this.assessmentQuery().where(eq(t.assessments.id, id));
+    return r ?? null;
+  }
+
+  public async createAssessment(data: {
+    courseId: string; termId: string; type: string; title: string; date: string; maxScore: number; actorId: string;
+  }) {
+    const id = await getDb().transaction(async (tx) => {
+      const [row] = await tx
+        .insert(t.assessments)
+        .values({
+          teacherAssignmentId: data.courseId, termId: data.termId, type: data.type,
+          title: data.title, date: data.date, maxScore: data.maxScore,
+        })
+        .returning({ id: t.assessments.id });
+      await tx.insert(t.auditLog).values({
+        userId: data.actorId, action: "assessment.create", entity: "assessment", entityId: row.id,
+        newValue: { title: data.title, type: data.type, maxScore: data.maxScore, termId: data.termId },
+      });
+      return row.id;
+    });
+    return (await this.getAssessmentById(id))!;
+  }
+
+  /** Every student of the class with their mark (or null) for this assessment. */
+  public async getMarkGrid(assessmentId: string, classId: string) {
+    return getDb()
+      .select({
+        studentId: t.students.userId,
+        studentName: t.users.fullName,
+        score: t.marks.score,
+        comment: t.marks.comment,
+      })
+      .from(t.students)
+      .innerJoin(t.users, eq(t.users.id, t.students.userId))
+      .leftJoin(t.marks, and(eq(t.marks.studentId, t.students.userId), eq(t.marks.assessmentId, assessmentId)))
+      .where(eq(t.students.classId, classId))
+      .orderBy(t.users.fullName);
+  }
+
+  /**
+   * Upserts/deletes marks for one assessment. Each real change writes an
+   * audit_log row (old -> new, who) in the same transaction. score=null deletes.
+   * Returns how many marks actually changed.
+   */
+  public async saveMarks(
+    assessmentId: string,
+    entries: Array<{ studentId: string; score: number | null; comment?: string | null }>,
+    actorId: string
+  ) {
+    let changed = 0;
+    await getDb().transaction(async (tx) => {
+      for (const e of entries) {
+        const [old] = await tx
+          .select()
+          .from(t.marks)
+          .where(and(eq(t.marks.assessmentId, assessmentId), eq(t.marks.studentId, e.studentId)));
+        const comment = e.comment ?? null;
+        if (e.score === null) {
+          if (!old) continue;
+          await tx.delete(t.marks).where(eq(t.marks.id, old.id));
+          await tx.insert(t.auditLog).values({
+            userId: actorId, action: "mark.delete", entity: "mark", entityId: old.id,
+            oldValue: { studentId: e.studentId, score: old.score, comment: old.comment }, newValue: null,
+          });
+          changed++;
+        } else if (!old) {
+          const [row] = await tx
+            .insert(t.marks)
+            .values({ assessmentId, studentId: e.studentId, score: e.score, comment, updatedBy: actorId })
+            .returning({ id: t.marks.id });
+          await tx.insert(t.auditLog).values({
+            userId: actorId, action: "mark.create", entity: "mark", entityId: row.id,
+            oldValue: null, newValue: { studentId: e.studentId, score: e.score, comment },
+          });
+          changed++;
+        } else if (old.score !== e.score || old.comment !== comment) {
+          await tx.update(t.marks).set({ score: e.score, comment, updatedBy: actorId, updatedAt: new Date() }).where(eq(t.marks.id, old.id));
+          await tx.insert(t.auditLog).values({
+            userId: actorId, action: "mark.update", entity: "mark", entityId: old.id,
+            oldValue: { studentId: e.studentId, score: old.score, comment: old.comment },
+            newValue: { studentId: e.studentId, score: e.score, comment },
+          });
+          changed++;
+        }
+      }
+    });
+    return changed;
   }
 
   // --- Attendance ---
