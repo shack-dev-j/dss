@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   // PGlite ships WASM + data files that must not be bundled (local dev / demo database).
-  serverExternalPackages: ["@electric-sql/pglite"],
+  serverExternalPackages: ["@electric-sql/pglite", "pdfkit"],
 };
 
 export default nextConfig;

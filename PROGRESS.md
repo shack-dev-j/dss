@@ -54,3 +54,16 @@ Scope source of truth: `docs/V1_PLAN.md` (`.ai/TASKS.md` and `.ai/STATE.md` are 
   done requires. Caddy/Let's Encrypt, the screens in a browser, a real GitHub Actions run of the new Postgres job.
 - **Leftovers:** CSV export only (no .xlsx; Excel opens the UTF-8 CSV); teacher import not supported (users are added in the UI);
   no UI to change a username; parent accounts/guardian links are still v2; login throttle is per process.
+
+## M4 — Transcripts and PDF: done on `feat/m4-transcripts` (2026-10-18)
+- **Done:** term and full-year transcript per student (subject, teacher, term averages, year average, final grade by the school's grading
+  scale; overall row), as a screen and as a server-generated A4 PDF (Uzbek or English labels, Noto Sans bundled so Uzbek letters
+  and Cyrillic render). Access: the student, their **class teacher**, admins, linked parents (guardian feature) — subject teachers
+  do not get transcripts. Class teachers/admins pick class → student on the Transcript screen.
+- **Tests:** 103 total (12 new). PDF text is verified with `pdftotext` (names with o'/g' modifier letters, teachers, averages, grades);
+  CI installs poppler so those tests run there too. Real `next start` served the PDF; I looked at the rendered page.
+- **Decision to review:** the plan wanted a headless-browser (Chromium) render matched to the school's paper layout. Without the
+  paper sample I used **pdfkit** (pure JS, no Chromium in the Docker image). The layout is generic; when the sample arrives only
+  `src/lib/transcript-pdf.ts` changes (header, columns, signature block).
+- **Leftovers:** no school logo/stamp image; the full-year grade is the mean of term averages (confirm with the school how the
+  year grade is really computed); Docker image copies `assets/` for the fonts (untested without Docker).

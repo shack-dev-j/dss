@@ -8,6 +8,7 @@ import { useI18n } from "@/i18n/context";
 import { AccountModule } from "@/components/modules/AccountModule";
 import { HomeworkModule } from "@/components/modules/HomeworkModule";
 import { MarksModule } from "@/components/modules/MarksModule";
+import { TranscriptModule } from "@/components/modules/TranscriptModule";
 import { SetupModule } from "@/components/modules/SetupModule";
 import { ReportsModule } from "@/components/modules/ReportsModule";
 import { UsersModule } from "@/components/modules/UsersModule";
@@ -57,6 +58,9 @@ export default function Home() {
 
       case "marks":
         return role === "student" || role === "teacher" || role === "admin" ? <MarksModule /> : <StudentDashboardModule onNavigate={(tab) => setActiveTab(tab)} />;
+
+      case "transcript":
+        return role === "student" || role === "teacher" || role === "admin" ? <TranscriptModule /> : <StudentDashboardModule onNavigate={(tab) => setActiveTab(tab)} />;
 
       case "setup":
         return role === "admin" ? <SetupModule /> : <StudentDashboardModule onNavigate={(tab) => setActiveTab(tab)} />;
@@ -153,6 +157,7 @@ export default function Home() {
               <option value="marks">{t.marks.title}</option>
               {role === "admin" && <option value="setup">{t.admin.setup}</option>}
               {(role === "admin" || role === "teacher") && <option value="reports">{t.admin.reports}</option>}
+              <option value="transcript">{t.transcript.title}</option>
               <option value="account">{t.auth.account}</option>
               {role === "admin" && <option value="users">{t.nav.userManagement}</option>}
               <option value="timetable">{t.nav.timetable}</option>

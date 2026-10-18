@@ -442,3 +442,48 @@ export async function attendanceExportRows(f: { classId: string; from: string; t
     .orderBy(asc(t.attendance.date), asc(t.timetableSlots.startTime), asc(t.users.fullName));
 }
 
+
+// ------------------------------------------------------------------ transcripts
+export async function getTranscriptSource(studentId: string) {
+  const [student] = await getDb()
+    .select({
+      id: t.users.id,
+      fullName: t.users.fullName,
+      classId: t.classes.id,
+      className: t.classes.name,
+      yearName: t.academicYears.name,
+    })
+    .from(t.users)
+    .innerJoin(t.students, eq(t.students.userId, t.users.id))
+    .innerJoin(t.classes, eq(t.classes.id, t.students.classId))
+    .innerJoin(t.academicYears, eq(t.academicYears.id, t.classes.yearId))
+    .where(and(eq(t.users.id, studentId), eq(t.users.role, "student")));
+  if (!student) return null;
+  const marks = await getDb()
+    .select({
+      subjectId: t.subjects.id,
+      subjectName: t.subjects.nameUz,
+      teacherName: sql<string>`(select u.full_name from ${t.users} u where u.id = ${t.teacherAssignments.teacherId})`,
+      termId: t.terms.id,
+      termName: t.terms.name,
+      termStart: t.terms.startDate,
+      score: t.marks.score,
+      maxScore: t.assessments.maxScore,
+    })
+    .from(t.marks)
+    .innerJoin(t.assessments, eq(t.assessments.id, t.marks.assessmentId))
+    .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.assessments.teacherAssignmentId))
+    .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+    .innerJoin(t.terms, eq(t.terms.id, t.assessments.termId))
+    .where(eq(t.marks.studentId, studentId));
+  return { student, marks };
+}
+
+export async function getStudentsInClass(classId: string) {
+  return getDb()
+    .select({ id: t.users.id, fullName: t.users.fullName })
+    .from(t.students)
+    .innerJoin(t.users, eq(t.users.id, t.students.userId))
+    .where(and(eq(t.students.classId, classId), eq(t.users.active, true)))
+    .orderBy(asc(t.users.fullName));
+}
