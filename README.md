@@ -50,10 +50,18 @@ pnpm test
 # Type check
 pnpm typecheck
 
+# Configure (the app refuses to start without DATABASE_URL, SESSION_SECRET, ANONYMOUS_PEPPER)
+cp .env.example .env.local   # then put real random values in SESSION_SECRET / ANONYMOUS_PEPPER
+
+# Create the local embedded database (PGlite, no Docker) and load demo data
+pnpm db:migrate && pnpm db:seed
+
 # Start development server
 pnpm dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Open [http://localhost:3000](http://localhost:3000) and sign in with a seeded username
+(`azamat.toirov` student, `jasur.rahimov` teacher, `director` / `manager` admin) and password `Demo123!`.
+With `DEMO_MODE=true` the login page also offers one-click demo roles.
 
 ---
 

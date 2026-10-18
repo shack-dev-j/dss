@@ -251,7 +251,7 @@ export function FacilitiesSupportModule() {
                 <div className="flex items-center space-x-3 shrink-0">
                   {getStatusBadge(tkt.status)}
 
-                  {(role === "manager" || role === "director" || role === "staff") && (
+                  {role === "admin" && (
                     <select
                       value={tkt.status}
                       onChange={(e) => handleStatusChange(tkt.id, e.target.value)}

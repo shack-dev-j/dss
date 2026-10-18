@@ -1,170 +1,320 @@
-import { getInitialFictionalData, SeedData } from "./seed/fictional-data";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { getDb } from "./client";
+import * as t from "./schema";
+import { resetDatabase, seedDatabase } from "./seed/seed";
 import { generateReceiptCode, generateSecretToken, hashSecretToken, verifySecretToken } from "@/lib/crypto";
-import { SuggestionStatus, UserRole } from "@/types";
+import { SuggestionStatus } from "@/types";
 
-// Persistent Data Repository for NamPS OS
+const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+// Data access layer over Drizzle. Authorization is NOT decided here: API
+// routes call the helpers in src/lib/authz.ts first and pass already-scoped
+// filters (classId / teacherId / studentId) into these methods.
 class DataRepository {
-  private data: SeedData;
-
-  constructor() {
-    this.data = getInitialFictionalData();
+  // --- Demo ---
+  public async resetDemoData(): Promise<void> {
+    const db = getDb();
+    await resetDatabase(db);
+    await seedDatabase(db);
   }
 
-  // Reset demo data back to initial state
-  public resetDemoData(): void {
-    this.data = getInitialFictionalData();
-  }
-
-  // --- Users & Auth ---
-  public async getUsers() {
-    return this.data.users.map(({ passwordHash, ...user }) => user);
+  // --- Users ---
+  public async getUserByUsername(username: string) {
+    const [u] = await getDb().select().from(t.users).where(eq(t.users.username, username.trim().toLowerCase()));
+    return u ?? null;
   }
 
   public async getUserById(id: string) {
-    const user = this.data.users.find((u) => u.id === id);
-    if (!user) return null;
-    const { passwordHash, ...safeUser } = user;
-    return safeUser;
+    const [u] = await getDb().select().from(t.users).where(eq(t.users.id, id));
+    return u ?? null;
   }
 
-  public async getUserByEmail(email: string) {
-    const user = this.data.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    return user || null;
+  public async getAllUsers() {
+    return getDb().select().from(t.users).orderBy(t.users.role, t.users.fullName);
   }
 
-  public async getChildrenForGuardian(guardianId: string) {
-    const guardian = this.data.users.find((u) => u.id === guardianId && u.role === "parent");
-    if (!guardian || !guardian.childrenIds) return [];
-    return this.data.users
-      .filter((u) => guardian.childrenIds?.includes(u.id))
-      .map(({ passwordHash, ...user }) => user);
+  public async getFirstUserByRole(role: string) {
+    const [u] = await getDb()
+      .select()
+      .from(t.users)
+      .where(and(eq(t.users.role, role), eq(t.users.active, true)))
+      .orderBy(t.users.createdAt, t.users.id)
+      .limit(1);
+    return u ?? null;
+  }
+
+  public async setPasswordHash(userId: string, passwordHash: string) {
+    await getDb().update(t.users).set({ passwordHash }).where(eq(t.users.id, userId));
   }
 
   // --- Timetable ---
-  public async getTimetableForStudent(gradeLevel: number, section: string) {
-    return this.data.timetable.filter(
-      (slot) => slot.gradeLevel === gradeLevel && slot.section.toUpperCase() === section.toUpperCase()
-    );
+  private slotQuery() {
+    return getDb()
+      .select({
+        id: t.timetableSlots.id,
+        courseId: t.timetableSlots.teacherAssignmentId,
+        dayOfWeek: t.timetableSlots.dayOfWeek,
+        startTime: t.timetableSlots.startTime,
+        endTime: t.timetableSlots.endTime,
+        room: t.timetableSlots.room,
+        subjectName: t.subjects.nameUz,
+        subjectNameUz: t.subjects.nameUz,
+        subjectNameEn: t.subjects.nameEn,
+        teacherName: t.users.fullName,
+        gradeLevel: t.classes.gradeLevel,
+        section: t.classes.section,
+        classId: t.classes.id,
+        teacherId: t.teacherAssignments.teacherId,
+      })
+      .from(t.timetableSlots)
+      .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.timetableSlots.teacherAssignmentId))
+      .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+      .innerJoin(t.classes, eq(t.classes.id, t.teacherAssignments.classId))
+      .innerJoin(t.users, eq(t.users.id, t.teacherAssignments.teacherId));
   }
 
-  public async getTimetableForTeacher(teacherName: string) {
-    return this.data.timetable.filter((slot) => slot.teacherName.toLowerCase().includes(teacherName.toLowerCase()));
+  public async getTimetableForClass(classId: string) {
+    return this.slotQuery().where(eq(t.classes.id, classId)).orderBy(t.timetableSlots.dayOfWeek, t.timetableSlots.startTime);
+  }
+
+  public async getTimetableForStudent(gradeLevel: number, section: string) {
+    return this.slotQuery()
+      .where(and(eq(t.classes.gradeLevel, gradeLevel), eq(sql`upper(${t.classes.section})`, section.toUpperCase())))
+      .orderBy(t.timetableSlots.dayOfWeek, t.timetableSlots.startTime);
+  }
+
+  public async getTimetableForTeacherId(teacherId: string) {
+    return this.slotQuery()
+      .where(eq(t.teacherAssignments.teacherId, teacherId))
+      .orderBy(t.timetableSlots.dayOfWeek, t.timetableSlots.startTime);
   }
 
   public async getAllTimetableSlots() {
-    return this.data.timetable;
+    return this.slotQuery().orderBy(t.timetableSlots.dayOfWeek, t.timetableSlots.startTime);
   }
 
   // --- Assignments & Submissions ---
-  public async getAssignments(gradeLevel?: number, section?: string, teacherId?: string) {
-    let result = this.data.assignments;
-    if (gradeLevel && section) {
-      result = result.filter((a) => a.gradeLevel === gradeLevel && a.section.toUpperCase() === section.toUpperCase());
-    } else if (teacherId) {
-      result = result.filter((a) => a.teacherId === teacherId);
+  private assignmentQuery() {
+    return getDb()
+      .select({
+        id: t.assignments.id,
+        courseId: t.assignments.teacherAssignmentId,
+        subjectName: t.subjects.nameUz,
+        teacherId: t.teacherAssignments.teacherId,
+        teacherName: t.users.fullName,
+        title: t.assignments.title,
+        instructions: t.assignments.instructions,
+        dueDate: t.assignments.dueDate,
+        estimatedMinutes: t.assignments.estimatedMinutes,
+        status: t.assignments.status,
+        gradeLevel: t.classes.gradeLevel,
+        section: t.classes.section,
+        classId: t.classes.id,
+      })
+      .from(t.assignments)
+      .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.assignments.teacherAssignmentId))
+      .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+      .innerJoin(t.classes, eq(t.classes.id, t.teacherAssignments.classId))
+      .innerJoin(t.users, eq(t.users.id, t.teacherAssignments.teacherId));
+  }
+
+  private mapAssignment<R extends { dueDate: Date }>(r: R) {
+    return { ...r, dueDate: r.dueDate.toISOString() };
+  }
+
+  public async getAssignments(filter: { classId?: string; gradeLevel?: number; section?: string; teacherId?: string } = {}) {
+    const conds = [];
+    if (filter.classId) conds.push(eq(t.classes.id, filter.classId));
+    if (filter.gradeLevel && filter.section) {
+      conds.push(eq(t.classes.gradeLevel, filter.gradeLevel), eq(sql`upper(${t.classes.section})`, filter.section.toUpperCase()));
     }
-    return result;
+    if (filter.teacherId) conds.push(eq(t.teacherAssignments.teacherId, filter.teacherId));
+    const rows = await this.assignmentQuery().where(conds.length ? and(...conds) : undefined).orderBy(t.assignments.dueDate);
+    return rows.map((r) => this.mapAssignment(r));
   }
 
   public async getAssignmentById(id: string) {
-    return this.data.assignments.find((a) => a.id === id) || null;
+    const [r] = await this.assignmentQuery().where(eq(t.assignments.id, id));
+    return r ? this.mapAssignment(r) : null;
   }
 
-  public async createAssignment(assignmentData: {
+  public async createAssignment(data: {
     courseId: string;
-    subjectName: string;
-    teacherId: string;
-    teacherName: string;
     title: string;
     instructions: string;
     dueDate: string;
     estimatedMinutes: number;
-    gradeLevel: number;
-    section: string;
   }) {
-    const newAssignment = {
-      id: `asg-${Date.now()}`,
-      ...assignmentData,
-      status: "published" as const,
-    };
-    this.data.assignments.unshift(newAssignment);
-    return newAssignment;
+    const [row] = await getDb()
+      .insert(t.assignments)
+      .values({
+        teacherAssignmentId: data.courseId,
+        title: data.title,
+        instructions: data.instructions,
+        dueDate: new Date(data.dueDate),
+        estimatedMinutes: data.estimatedMinutes,
+      })
+      .returning({ id: t.assignments.id });
+    return (await this.getAssignmentById(row.id))!;
+  }
+
+  private submissionQuery() {
+    return getDb()
+      .select({
+        id: t.submissions.id,
+        assignmentId: t.submissions.assignmentId,
+        studentId: t.submissions.studentId,
+        studentName: t.users.fullName,
+        content: t.submissions.content,
+        submittedAt: t.submissions.submittedAt,
+        grade: t.submissions.grade,
+        maxScore: t.submissions.maxScore,
+        feedback: t.submissions.feedback,
+        status: t.submissions.status,
+      })
+      .from(t.submissions)
+      .innerJoin(t.users, eq(t.users.id, t.submissions.studentId));
+  }
+
+  private mapSubmission<R extends { submittedAt: Date; grade: number | null; feedback: string | null }>(r: R) {
+    return { ...r, submittedAt: r.submittedAt.toISOString(), grade: r.grade ?? undefined, feedback: r.feedback ?? undefined };
   }
 
   public async getSubmissionsForAssignment(assignmentId: string) {
-    return this.data.submissions.filter((s) => s.assignmentId === assignmentId);
+    const rows = await this.submissionQuery().where(eq(t.submissions.assignmentId, assignmentId));
+    return rows.map((r) => this.mapSubmission(r));
   }
 
   public async getStudentSubmission(assignmentId: string, studentId: string) {
-    return this.data.submissions.find((s) => s.assignmentId === assignmentId && s.studentId === studentId) || null;
-  }
-
-  public async submitAssignment(assignmentId: string, studentId: string, studentName: string, content: string) {
-    const existingIndex = this.data.submissions.findIndex(
-      (s) => s.assignmentId === assignmentId && s.studentId === studentId
+    const [r] = await this.submissionQuery().where(
+      and(eq(t.submissions.assignmentId, assignmentId), eq(t.submissions.studentId, studentId))
     );
-    const submission = {
-      id: existingIndex >= 0 ? this.data.submissions[existingIndex].id : `sub-${Date.now()}`,
-      assignmentId,
-      studentId,
-      studentName,
-      content,
-      submittedAt: new Date().toISOString(),
-      maxScore: 100,
-      status: "submitted" as const,
-    };
-
-    if (existingIndex >= 0) {
-      this.data.submissions[existingIndex] = { ...this.data.submissions[existingIndex], ...submission };
-    } else {
-      this.data.submissions.unshift(submission);
-    }
-    return submission;
+    return r ? this.mapSubmission(r) : null;
   }
 
-  public async gradeSubmission(submissionId: string, grade: number, feedback: string) {
-    const sub = this.data.submissions.find((s) => s.id === submissionId);
-    if (!sub) throw new Error("Submission not found");
-    sub.grade = grade;
-    sub.feedback = feedback;
-    sub.status = "graded";
-    return sub;
+  public async getSubmissionById(id: string) {
+    const [r] = await this.submissionQuery().where(eq(t.submissions.id, id));
+    return r ? this.mapSubmission(r) : null;
+  }
+
+  public async submitAssignment(assignmentId: string, studentId: string, content: string) {
+    const [row] = await getDb()
+      .insert(t.submissions)
+      .values({ assignmentId, studentId, content })
+      .onConflictDoUpdate({
+        target: [t.submissions.assignmentId, t.submissions.studentId],
+        set: { content, submittedAt: new Date(), status: "submitted" },
+      })
+      .returning({ id: t.submissions.id });
+    return (await this.getSubmissionById(row.id))!;
+  }
+
+  /** Grades a submission; the audit row is written in the same transaction. */
+  public async gradeSubmission(submissionId: string, grade: number, feedback: string, actorId?: string) {
+    await getDb().transaction(async (tx) => {
+      const [old] = await tx.select().from(t.submissions).where(eq(t.submissions.id, submissionId));
+      if (!old) throw new Error("Submission not found");
+      await tx.update(t.submissions).set({ grade, feedback, status: "graded" }).where(eq(t.submissions.id, submissionId));
+      await tx.insert(t.auditLog).values({
+        userId: actorId ?? null,
+        action: "submission.grade",
+        entity: "submission",
+        entityId: submissionId,
+        oldValue: { grade: old.grade, feedback: old.feedback },
+        newValue: { grade, feedback },
+      });
+    });
+    return (await this.getSubmissionById(submissionId))!;
+  }
+
+  // --- Marks (read side; M2 adds the grid and writes) ---
+  /** Marks for one student. If teacherId is given, only that teacher's subjects are returned. */
+  public async getMarksForStudent(studentId: string, onlyTeacherId?: string) {
+    const conds = [eq(t.marks.studentId, studentId)];
+    if (onlyTeacherId) conds.push(eq(t.teacherAssignments.teacherId, onlyTeacherId));
+    return getDb()
+      .select({
+        id: t.marks.id,
+        assessmentId: t.marks.assessmentId,
+        title: t.assessments.title,
+        type: t.assessments.type,
+        date: t.assessments.date,
+        termId: t.assessments.termId,
+        subjectName: t.subjects.nameUz,
+        score: t.marks.score,
+        maxScore: t.assessments.maxScore,
+        comment: t.marks.comment,
+      })
+      .from(t.marks)
+      .innerJoin(t.assessments, eq(t.assessments.id, t.marks.assessmentId))
+      .innerJoin(t.teacherAssignments, eq(t.teacherAssignments.id, t.assessments.teacherAssignmentId))
+      .innerJoin(t.subjects, eq(t.subjects.id, t.teacherAssignments.subjectId))
+      .where(and(...conds))
+      .orderBy(t.assessments.date);
   }
 
   // --- Attendance ---
   public async getAttendanceForStudent(studentId: string) {
-    return this.data.attendance.filter((a) => a.studentId === studentId);
+    return this.attendanceQuery().where(eq(t.attendance.studentId, studentId));
   }
 
   public async getAttendanceForSlotAndDate(slotId: string, date: string) {
-    return this.data.attendance.filter((a) => a.slotId === slotId && a.date === date);
+    return this.attendanceQuery().where(and(eq(t.attendance.slotId, slotId), eq(t.attendance.date, date)));
   }
 
-  public async markAttendance(records: Array<{
-    slotId: string;
-    studentId: string;
-    studentName: string;
-    date: string;
-    status: "present" | "absent" | "late" | "excused";
-    notes?: string;
-  }>) {
-    for (const record of records) {
-      const idx = this.data.attendance.findIndex(
-        (a) => a.slotId === record.slotId && a.studentId === record.studentId && a.date === record.date
-      );
-      if (idx >= 0) {
-        this.data.attendance[idx] = { ...this.data.attendance[idx], ...record };
-      } else {
-        this.data.attendance.push({
-          id: `att-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-          ...record,
-        });
+  private attendanceQuery() {
+    return getDb()
+      .select({
+        id: t.attendance.id,
+        date: t.attendance.date,
+        slotId: t.attendance.slotId,
+        studentId: t.attendance.studentId,
+        studentName: t.users.fullName,
+        status: t.attendance.status,
+        notes: t.attendance.notes,
+      })
+      .from(t.attendance)
+      .innerJoin(t.users, eq(t.users.id, t.attendance.studentId));
+  }
+
+  public async getStudentIdsInClass(classId: string) {
+    const rows = await getDb().select({ id: t.students.userId }).from(t.students).where(eq(t.students.classId, classId));
+    return rows.map((r) => r.id);
+  }
+
+  public async markAttendance(
+    records: Array<{ slotId: string; studentId: string; date: string; status: string; notes?: string }>,
+    recordedBy: string
+  ) {
+    await getDb().transaction(async (tx) => {
+      for (const r of records) {
+        const [old] = await tx
+          .select()
+          .from(t.attendance)
+          .where(and(eq(t.attendance.slotId, r.slotId), eq(t.attendance.studentId, r.studentId), eq(t.attendance.date, r.date)));
+        await tx
+          .insert(t.attendance)
+          .values({ slotId: r.slotId, studentId: r.studentId, date: r.date, status: r.status, notes: r.notes ?? null, recordedBy })
+          .onConflictDoUpdate({
+            target: [t.attendance.slotId, t.attendance.studentId, t.attendance.date],
+            set: { status: r.status, notes: r.notes ?? null, recordedBy },
+          });
+        if (old && (old.status !== r.status || old.notes !== (r.notes ?? null))) {
+          await tx.insert(t.auditLog).values({
+            userId: recordedBy,
+            action: "attendance.update",
+            entity: "attendance",
+            entityId: old.id,
+            oldValue: { status: old.status, notes: old.notes },
+            newValue: { status: r.status, notes: r.notes ?? null },
+          });
+        }
       }
-    }
+    });
     return true;
   }
 
-  // --- Truly Anonymous Suggestions Subsystem ---
+  // --- Truly Anonymous Suggestions (no user id is ever stored) ---
   public async submitAnonymousSuggestion(
     category: "academic" | "facilities" | "catering" | "events" | "general",
     title: string,
@@ -172,164 +322,123 @@ class DataRepository {
   ) {
     const receiptCode = generateReceiptCode();
     const secretToken = generateSecretToken();
-    const secretHash = hashSecretToken(secretToken);
+    const [row] = await getDb()
+      .insert(t.anonymousSuggestions)
+      .values({ receiptCode, secretHash: hashSecretToken(secretToken), category, title, content })
+      .returning({ createdAt: t.anonymousSuggestions.createdAt });
+    return { receiptCode, secretToken, createdAt: row.createdAt.toISOString() };
+  }
 
-    const record = {
-      id: `sug-${Date.now()}`,
-      receiptCode,
-      secretHash,
-      category,
-      title,
-      content,
-      status: "received" as SuggestionStatus,
-      officialResponse: null,
-      respondedAt: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      // MATHEMATICAL ZERO IDENTITY: no user_id, no student_id, no author_ip
-    };
-
-    this.data.anonymousSuggestions.unshift(record);
-
+  private publicSuggestion(r: typeof t.anonymousSuggestions.$inferSelect) {
+    const { secretHash, ...rest } = r;
+    void secretHash;
     return {
-      receiptCode,
-      secretToken, // Returned ONLY ONCE to submitter
-      createdAt: record.createdAt,
+      ...rest,
+      respondedAt: iso(rest.respondedAt),
+      createdAt: rest.createdAt.toISOString(),
+      updatedAt: rest.updatedAt.toISOString(),
     };
   }
 
   public async getAnonymousSuggestionByReceipt(receiptCode: string, secretToken: string) {
-    const cleanCode = receiptCode.trim().toUpperCase();
-    const cleanToken = secretToken.trim();
-
-    const record = this.data.anonymousSuggestions.find((s) => s.receiptCode === cleanCode);
-    if (!record) return null;
-
-    const isValid = verifySecretToken(cleanToken, record.secretHash);
-    if (!isValid) return null;
-
-    // Never return the secretHash to the client
-    const { secretHash, ...publicRecord } = record;
-    return publicRecord;
+    const [record] = await getDb()
+      .select()
+      .from(t.anonymousSuggestions)
+      .where(eq(t.anonymousSuggestions.receiptCode, receiptCode.trim().toUpperCase()));
+    if (!record || !verifySecretToken(secretToken.trim(), record.secretHash)) return null;
+    return this.publicSuggestion(record);
   }
 
-  public async getAllAnonymousSuggestions(callerRole: UserRole) {
-    if (callerRole !== "director" && callerRole !== "manager") {
-      throw new Error("Unauthorized to access anonymous suggestions review");
-    }
-    // Zero user fields exist in the record, ensuring complete author anonymity
-    return this.data.anonymousSuggestions.map(({ secretHash, ...s }) => s);
+  /** Caller (route) must already have verified the admin role. */
+  public async getAllAnonymousSuggestions() {
+    const rows = await getDb().select().from(t.anonymousSuggestions).orderBy(desc(t.anonymousSuggestions.createdAt));
+    return rows.map((r) => this.publicSuggestion(r));
   }
 
-  public async updateAnonymousSuggestionStatus(
-    id: string,
-    status: SuggestionStatus,
-    officialResponse: string | undefined,
-    callerRole: UserRole
-  ) {
-    if (callerRole !== "director" && callerRole !== "manager") {
-      throw new Error("Unauthorized to update suggestion status");
-    }
-
-    const item = this.data.anonymousSuggestions.find((s) => s.id === id);
-    if (!item) throw new Error("Suggestion not found");
-
-    item.status = status;
+  public async updateAnonymousSuggestionStatus(id: string, status: SuggestionStatus, officialResponse?: string) {
+    const set: Partial<typeof t.anonymousSuggestions.$inferInsert> = { status, updatedAt: new Date() };
     if (officialResponse !== undefined) {
-      item.officialResponse = officialResponse;
-      item.respondedAt = new Date().toISOString();
+      set.officialResponse = officialResponse;
+      set.respondedAt = new Date();
     }
-    item.updatedAt = new Date().toISOString();
-
-    const { secretHash, ...updated } = item;
-    return updated;
+    const [row] = await getDb().update(t.anonymousSuggestions).set(set).where(eq(t.anonymousSuggestions.id, id)).returning();
+    if (!row) throw new Error("Suggestion not found");
+    return this.publicSuggestion(row);
   }
 
   // --- Announcements ---
-  public async getAnnouncements(audience?: "all" | "staff" | "class" | "students") {
-    if (!audience || audience === "all") {
-      return this.data.announcements;
-    }
-    return this.data.announcements.filter((a) => a.targetAudience === "all" || a.targetAudience === audience);
+  public async getAnnouncements(audiences: Array<"all" | "staff" | "class" | "students">) {
+    const rows = await getDb()
+      .select()
+      .from(t.announcements)
+      .where(inArray(t.announcements.targetAudience, audiences))
+      .orderBy(desc(t.announcements.createdAt));
+    return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
   }
 
   public async createAnnouncement(data: {
+    authorId: string;
     title: string;
     content: string;
     authorName: string;
     targetAudience: "all" | "staff" | "class" | "students";
     priority: "urgent" | "normal" | "info";
   }) {
-    const ann = {
-      id: `ann-${Date.now()}`,
-      ...data,
-      createdAt: new Date().toISOString(),
-    };
-    this.data.announcements.unshift(ann);
-    return ann;
+    const [r] = await getDb().insert(t.announcements).values(data).returning();
+    return { ...r, createdAt: r.createdAt.toISOString() };
   }
 
-  // --- Policies & Rules ---
+  // --- Policies, events, clubs, projects, tickets (feature-flagged modules) ---
   public async getPolicies(category?: string) {
-    if (category) {
-      return this.data.policies.filter((p) => p.category === category);
-    }
-    return this.data.policies;
+    return getDb().select().from(t.policies).where(category ? eq(t.policies.category, category) : undefined);
   }
 
-  // --- Events & Clubs ---
   public async getEvents() {
-    return this.data.events;
+    return getDb().select().from(t.events).orderBy(t.events.date);
   }
 
   public async registerForEvent(eventId: string) {
-    const event = this.data.events.find((e) => e.id === eventId);
-    if (!event) throw new Error("Event not found");
-    if (event.registeredCount >= event.capacity) {
-      throw new Error("Event capacity full");
-    }
-    event.registeredCount += 1;
-    return event;
+    const [row] = await getDb()
+      .update(t.events)
+      .set({ registeredCount: sql`${t.events.registeredCount} + 1` })
+      .where(and(eq(t.events.id, eventId), sql`${t.events.registeredCount} < ${t.events.capacity}`))
+      .returning();
+    if (row) return row;
+    const [exists] = await getDb().select({ id: t.events.id }).from(t.events).where(eq(t.events.id, eventId));
+    throw new Error(exists ? "Event capacity full" : "Event not found");
   }
 
   public async getClubs() {
-    return this.data.clubs;
+    return getDb().select().from(t.clubs);
   }
 
-  // --- Projects ---
   public async getProjects() {
-    return this.data.projects;
+    const rows = await getDb().select().from(t.studentProjects);
+    return rows.map(({ milestones, ...p }) => ({ ...p, milestones }));
   }
 
-  // --- Support Tickets ---
   public async getSupportTickets() {
-    return this.data.supportTickets;
+    const rows = await getDb().select().from(t.supportTickets).orderBy(desc(t.supportTickets.createdAt));
+    return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
   }
 
   public async createSupportTicket(data: {
+    reporterId: string;
     reporterName: string;
     category: "it" | "facilities" | "smartboard";
     title: string;
     description: string;
     priority: "high" | "medium" | "low";
   }) {
-    const ticket = {
-      id: `tkt-${Date.now()}`,
-      ...data,
-      status: "open" as const,
-      createdAt: new Date().toISOString(),
-    };
-    this.data.supportTickets.unshift(ticket);
-    return ticket;
+    const [r] = await getDb().insert(t.supportTickets).values(data).returning();
+    return { ...r, createdAt: r.createdAt.toISOString() };
   }
 
   public async updateSupportTicketStatus(id: string, status: "open" | "in_progress" | "resolved") {
-    const ticket = this.data.supportTickets.find((t) => t.id === id);
-    if (!ticket) throw new Error("Ticket not found");
-    ticket.status = status;
-    return ticket;
+    const [r] = await getDb().update(t.supportTickets).set({ status }).where(eq(t.supportTickets.id, id)).returning();
+    if (!r) throw new Error("Ticket not found");
+    return { ...r, createdAt: r.createdAt.toISOString() };
   }
 }
 
-// Global Singleton Instance
 export const db = new DataRepository();

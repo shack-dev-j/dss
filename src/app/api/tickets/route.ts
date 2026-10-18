@@ -1,32 +1,46 @@
 import { NextResponse } from "next/server";
+import { badRequest, notFound, readJson, withAuth } from "@/lib/authz";
 import { db } from "@/db";
 
-export async function GET() {
-  try {
-    const tickets = await db.getSupportTickets();
-    return NextResponse.json({ tickets }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch tickets" }, { status: 500 });
-  }
-}
+const CATEGORIES = ["it", "facilities", "smartboard"] as const;
+const PRIORITIES = ["high", "medium", "low"] as const;
+const STATUSES = ["open", "in_progress", "resolved"] as const;
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const ticket = await db.createSupportTicket(body);
+export const GET = withAuth(
+  async (_req, user) => {
+    const all = await db.getSupportTickets();
+    // Non-admins only see tickets they reported.
+    return NextResponse.json({ tickets: user.role === "admin" ? all : all.filter((t) => t.reporterId === user.id) });
+  },
+  { feature: "facilities" }
+);
+
+export const POST = withAuth(
+  async (req, user) => {
+    const body = await readJson(req);
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const description = typeof body.description === "string" ? body.description.trim() : "";
+    const category = CATEGORIES.find((c) => c === body.category);
+    const priority = PRIORITIES.find((p) => p === body.priority) ?? "medium";
+    if (!title || !description || !category) throw badRequest("title, description and a valid category are required");
+    const ticket = await db.createSupportTicket({
+      reporterId: user.id, reporterName: user.fullName, category, title, description, priority,
+    });
     return NextResponse.json({ ticket }, { status: 201 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to create ticket" }, { status: 500 });
-  }
-}
+  },
+  { feature: "facilities" }
+);
 
-export async function PATCH(req: Request) {
-  try {
-    const body = await req.json();
-    const { id, status } = body;
-    const ticket = await db.updateSupportTicketStatus(id, status);
-    return NextResponse.json({ ticket }, { status: 200 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to update ticket" }, { status: 500 });
-  }
-}
+export const PATCH = withAuth(
+  async (req) => {
+    const body = await readJson(req);
+    const status = STATUSES.find((s) => s === body.status);
+    if (typeof body.id !== "string" || !status) throw badRequest("id and a valid status are required");
+    try {
+      return NextResponse.json({ ticket: await db.updateSupportTicketStatus(body.id, status) });
+    } catch {
+      throw notFound("Ticket not found");
+    }
+  },
+  { feature: "facilities", roles: ["admin"] }
+);

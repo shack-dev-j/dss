@@ -13,11 +13,12 @@ import {
   User,
   ChevronDown,
   ShieldCheck,
-  Check
+  Check,
+  LogOut
 } from "lucide-react";
 
 export function Navbar() {
-  const { user, role, switchRole } = useAuth();
+  const { user, role, switchRole, signOut, demoMode } = useAuth();
   const { locale, setLocale, t } = useI18n();
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -52,9 +53,7 @@ export function Navbar() {
   const rolesList: { id: UserRole; name: string }[] = [
     { id: "student", name: t.roles.student },
     { id: "teacher", name: t.roles.teacher },
-    { id: "director", name: t.roles.director },
-    { id: "manager", name: t.roles.manager },
-    { id: "parent", name: t.roles.parent },
+    { id: "admin", name: t.roles.admin },
   ];
 
   return (
@@ -70,9 +69,11 @@ export function Navbar() {
               <span className="font-bold text-lg tracking-tight text-slate-900 dark:text-white">
                 NamPS OS
               </span>
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wider bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
-                {t.common.demoBadge}
-              </span>
+              {demoMode && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wider bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                  {t.common.demoBadge}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
               {t.common.schoolName}
@@ -82,7 +83,8 @@ export function Navbar() {
 
         {/* Right Controls */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          {/* Quick Role Switcher */}
+          {/* Quick Role Switcher (demo mode only) */}
+          {demoMode ? (
           <div className="relative">
             <button
               onClick={() => setRoleMenuOpen(!roleMenuOpen)}
@@ -116,6 +118,7 @@ export function Navbar() {
               </div>
             )}
           </div>
+          ) : null}
 
           {/* Language Switcher */}
           <button
@@ -136,7 +139,8 @@ export function Navbar() {
             {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
           </button>
 
-          {/* Reset Demo State Button */}
+          {/* Reset Demo State Button (demo mode, admin only) */}
+          {demoMode && role === "admin" && (
           <button
             onClick={handleResetDemo}
             disabled={isResetting}
@@ -145,6 +149,15 @@ export function Navbar() {
           >
             <RotateCcw className={`w-3.5 h-3.5 ${isResetting ? "animate-spin" : ""}`} />
             <span className="hidden md:inline">{t.common.resetDemo}</span>
+          </button>
+          )}
+
+          <button
+            onClick={() => signOut()}
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">{t.auth.signOut}</span>
           </button>
 
           {/* User Avatar */}

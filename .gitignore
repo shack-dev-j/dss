@@ -34,4 +34,10 @@ pnpm-debug.log*
 Thumbs.db
 
 # Drizzle Kit output
-/drizzle/meta
+
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Local PGlite dev database
+/.data/

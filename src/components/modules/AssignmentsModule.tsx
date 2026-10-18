@@ -83,46 +83,14 @@ export function AssignmentsModule() {
     async function loadSubmissions() {
       if (!selectedAssignment) return;
       try {
-        // In local demo repository, check submission for student
-        if (role === "student" && user) {
-          const res = await fetch(`/api/assignments/submit?assignmentId=${selectedAssignment.id}&studentId=${user.id}`);
-          // Fallback or demo state
-          if (selectedAssignment.id === "asg-01") {
-            setStudentSubmission({
-              id: "sub-01",
-              assignmentId: "asg-01",
-              studentId: user.id,
-              studentName: user.fullName,
-              content: "Trigonometrik masalalar to'liq yechildi. Havola: https://drive.google.com/open?id=demo_homework_10a",
-              submittedAt: "2026-10-18T14:20:00",
-              grade: 95,
-              maxScore: 100,
-              feedback: "A'lo darajada bajarilgan. 8-misolda muqobil yechim usuli juda chiroyli qo'llanilgan.",
-              status: "graded",
-            });
-          } else {
-            setStudentSubmission(null);
-          }
-        } else if (role === "teacher") {
-          // Teacher sees student submissions for assignment 1
-          if (selectedAssignment.id === "asg-01") {
-            setSubmissions([
-              {
-                id: "sub-01",
-                assignmentId: "asg-01",
-                studentId: "usr-stu-01",
-                studentName: "Azamat Toirov (10-A)",
-                content: "Trigonometrik masalalar to'liq yechildi. Havola: https://drive.google.com/open?id=demo_homework_10a",
-                submittedAt: "2026-10-18T14:20:00",
-                grade: 95,
-                maxScore: 100,
-                feedback: "A'lo darajada bajarilgan. 8-misolda muqobil yechim usuli juda chiroyli qo'llanilgan.",
-                status: "graded",
-              },
-            ]);
-          } else {
-            setSubmissions([]);
-          }
+        const res = await fetch(`/api/assignments/submit?assignmentId=${selectedAssignment.id}`);
+        if (!res.ok) {
+          setStudentSubmission(null);
+          setSubmissions([]);
+        } else {
+          const data = await res.json();
+          if (role === "student") setStudentSubmission(data.submissions?.[0] ?? null);
+          else setSubmissions(data.submissions ?? []);
         }
       } catch (err) {
         console.error("Submissions load error:", err);

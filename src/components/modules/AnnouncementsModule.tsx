@@ -104,7 +104,7 @@ export function AnnouncementsModule() {
           </p>
         </div>
 
-        {(role === "director" || role === "manager" || role === "teacher") && (
+        {(role === "admin" || role === "teacher") && (
           <button
             onClick={() => setIsCreating(!isCreating)}
             className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs transition-colors shadow-sm self-start sm:self-auto"

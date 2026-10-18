@@ -33,7 +33,7 @@ export function SuggestionsReviewModule() {
   const fetchSuggestions = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/suggestions/review?role=${role}`);
+      const res = await fetch(`/api/suggestions/review`);
       const data = await res.json();
       if (res.ok) {
         setSuggestions(data.suggestions || []);
@@ -99,7 +99,7 @@ export function SuggestionsReviewModule() {
     return <Badge variant={s.variant}>{s.label}</Badge>;
   };
 
-  if (role !== "director" && role !== "manager") {
+  if (role !== "admin") {
     return (
       <div className="p-8 text-center text-slate-500">
         Ushbu bo'lim faqat Maktab Direktori va Menejeri uchun ochiq.

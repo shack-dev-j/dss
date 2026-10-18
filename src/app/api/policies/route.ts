@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/authz";
 import { db } from "@/db";
 
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const category = searchParams.get("category") || undefined;
-    const policies = await db.getPolicies(category);
-    return NextResponse.json({ policies }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch policies" }, { status: 500 });
-  }
-}
+export const GET = withAuth(
+  async (req) => {
+    const category = new URL(req.url).searchParams.get("category") || undefined;
+    return NextResponse.json({ policies: await db.getPolicies(category) });
+  },
+  { feature: "knowledge" }
+);

@@ -1,26 +1,23 @@
 import { NextResponse } from "next/server";
+import { withAuth } from "@/lib/authz";
 import { db } from "@/db";
 
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const gradeLevel = searchParams.get("gradeLevel");
-    const section = searchParams.get("section");
-    const teacherName = searchParams.get("teacherName");
-
-    if (gradeLevel && section) {
-      const slots = await db.getTimetableForStudent(parseInt(gradeLevel), section);
-      return NextResponse.json({ slots }, { status: 200 });
-    }
-
-    if (teacherName) {
-      const slots = await db.getTimetableForTeacher(teacherName);
-      return NextResponse.json({ slots }, { status: 200 });
-    }
-
-    const slots = await db.getAllTimetableSlots();
-    return NextResponse.json({ slots }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch timetable" }, { status: 500 });
+// Scope comes from the session, never from query params (admins may filter).
+export const GET = withAuth(async (req, user) => {
+  const sp = new URL(req.url).searchParams;
+  if (user.role === "student") {
+    return NextResponse.json({ slots: user.classId ? await db.getTimetableForClass(user.classId) : [] });
   }
-}
+  if (user.role === "teacher") {
+    return NextResponse.json({ slots: await db.getTimetableForTeacherId(user.id) });
+  }
+  if (user.role === "admin") {
+    const grade = sp.get("gradeLevel");
+    const section = sp.get("section");
+    const teacherId = sp.get("teacherId");
+    if (grade && section) return NextResponse.json({ slots: await db.getTimetableForStudent(parseInt(grade), section) });
+    if (teacherId) return NextResponse.json({ slots: await db.getTimetableForTeacherId(teacherId) });
+    return NextResponse.json({ slots: await db.getAllTimetableSlots() });
+  }
+  return NextResponse.json({ slots: [] });
+});

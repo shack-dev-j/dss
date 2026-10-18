@@ -1,6 +1,5 @@
 import crypto from "crypto";
-
-const PEPPER = process.env.ANONYMOUS_PEPPER || "namps-default-crypto-pepper-2026";
+import { env } from "@/lib/env";
 
 /**
  * Generates a random, non-identifying public receipt code.
@@ -30,7 +29,7 @@ export function generateSecretToken(): string {
 export function hashSecretToken(token: string): string {
   return crypto
     .createHash("sha256")
-    .update(`${token}:${PEPPER}`)
+    .update(`${token}:${env.anonymousPepper()}`)
     .digest("hex");
 }
 

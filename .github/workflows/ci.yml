@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Throwaway values: tests run on in-memory PGlite, build needs no secrets.
+      DATABASE_URL: memory://
+      SESSION_SECRET: ci-session-secret-0123456789abcdef0123456789
+      ANONYMOUS_PEPPER: ci-anonymous-pepper-0123456789
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      # pnpm/action-setup's bootstrap crashes on this repo's pnpm config, so install pnpm directly.
+      - run: npm install -g pnpm@11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build

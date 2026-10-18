@@ -1,14 +1,13 @@
-export type UserRole = "director" | "manager" | "teacher" | "student" | "parent" | "librarian" | "staff";
+export type UserRole = "admin" | "teacher" | "student" | "parent";
 
 export interface UserSession {
   id: string;
-  email: string;
+  username: string;
   fullName: string;
   role: UserRole;
-  avatarUrl?: string;
-  gradeLevel?: number; // for students
-  section?: string;    // for students, e.g. "A"
-  childrenIds?: string[]; // for parents
+  classId?: string;    // students
+  gradeLevel?: number; // students
+  section?: string;    // students, e.g. "A"
 }
 
 export type SuggestionStatus =

@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { UserRole } from "@/types";
+import { readJson, withAuth } from "@/lib/authz";
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const { entityType, csvContent, isDryRun, callerRole } = body;
-
-    if (callerRole !== "director" && callerRole !== "manager") {
-      return NextResponse.json({ error: "Access denied. Manager or Director authorization required." }, { status: 403 });
-    }
+export const POST = withAuth(async (req) => {
+  {
+    const body = await readJson(req);
+    const { entityType, csvContent, isDryRun } = body as { entityType?: string; csvContent?: string; isDryRun?: boolean };
 
     if (!entityType || !csvContent) {
       return NextResponse.json({ error: "entityType and csvContent are required." }, { status: 400 });
@@ -90,7 +86,5 @@ export async function POST(req: Request) {
       entityType,
       message: `Successfully imported ${parsedRecords.length} ${entityType} records into NamPS OS.`,
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to process CSV import" }, { status: 500 });
   }
-}
+}, { roles: ["admin"] });

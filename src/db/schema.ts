@@ -1,167 +1,255 @@
-import { pgTable, text, varchar, timestamp, integer, boolean, uuid, jsonb } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  varchar,
+  timestamp,
+  integer,
+  boolean,
+  jsonb,
+  unique,
+  index,
+} from "drizzle-orm/pg-core";
 
-// 1. Users
+const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
+const createdAt = () => timestamp("created_at").defaultNow().notNull();
+
+// ---------------------------------------------------------------------------
+// Identity & sessions
+// ---------------------------------------------------------------------------
+
+// Roles: admin | teacher | student | parent (parent is v2, feature-flagged).
+// "Class teacher" is a relationship (classes.class_teacher_id), not a role.
 export const users = pgTable("users", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  email: varchar("email", { length: 255 }).notNull().unique(),
-  passwordHash: text("password_hash").notNull(),
+  id: id(),
+  username: varchar("username", { length: 64 }).notNull().unique(),
   fullName: varchar("full_name", { length: 255 }).notNull(),
-  role: varchar("role", { length: 50 }).notNull(), // director, manager, teacher, student, parent, librarian, staff
-  avatarUrl: text("avatar_url"),
-  gradeLevel: integer("grade_level"), // 5 - 11
-  section: varchar("section", { length: 10 }), // A, B, C
-  isActive: boolean("is_active").default(true).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  role: varchar("role", { length: 20 }).notNull(),
+  passwordHash: text("password_hash").notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: createdAt(),
 });
 
-// 2. Guardian-Student Relationships
-export const guardiansStudents = pgTable("guardians_students", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  guardianId: uuid("guardian_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  studentId: uuid("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  relationshipType: varchar("relationship_type", { length: 50 }).default("parent").notNull(), // father, mother, legal_guardian
-  isVerified: boolean("is_verified").default(true).notNull(),
-});
+// Server-side sessions. `id` is HMAC-SHA256(token, SESSION_SECRET); the raw
+// token only ever lives in the httpOnly cookie.
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("sessions_user_idx").on(t.userId)]
+);
 
-// 3. Academic Years & Terms
+export const guardiansStudents = pgTable(
+  "guardians_students",
+  {
+    guardianId: text("guardian_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    studentId: text("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  },
+  (t) => [unique().on(t.guardianId, t.studentId)]
+);
+
+// ---------------------------------------------------------------------------
+// Academic structure
+// ---------------------------------------------------------------------------
+
 export const academicYears = pgTable("academic_years", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 100 }).notNull(), // e.g. "2026-2027"
-  startDate: timestamp("start_date").notNull(),
-  endDate: timestamp("end_date").notNull(),
-  isCurrent: boolean("is_current").default(true).notNull(),
+  id: id(),
+  name: varchar("name", { length: 100 }).notNull(),
+  startDate: varchar("start_date", { length: 10 }).notNull(),
+  endDate: varchar("end_date", { length: 10 }).notNull(),
 });
 
 export const terms = pgTable("terms", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  academicYearId: uuid("academic_year_id").references(() => academicYears.id, { onDelete: "cascade" }).notNull(),
-  name: varchar("name", { length: 100 }).notNull(), // "Term 1"
-  termNumber: integer("term_number").notNull(),
-  startDate: timestamp("start_date").notNull(),
-  endDate: timestamp("end_date").notNull(),
+  id: id(),
+  yearId: text("year_id").references(() => academicYears.id, { onDelete: "cascade" }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  startDate: varchar("start_date", { length: 10 }).notNull(),
+  endDate: varchar("end_date", { length: 10 }).notNull(),
+  closed: boolean("closed").default(false).notNull(),
 });
 
-// 4. Classes (Sinflar)
 export const classes = pgTable("classes", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  gradeLevel: integer("grade_level").notNull(), // 5 - 11
-  section: varchar("section", { length: 10 }).notNull(), // "A", "B", "C"
-  academicYearId: uuid("academic_year_id").references(() => academicYears.id).notNull(),
+  id: id(),
+  name: varchar("name", { length: 20 }).notNull(), // "10-A"
+  gradeLevel: integer("grade_level").notNull(),
+  section: varchar("section", { length: 10 }).notNull(),
+  yearId: text("year_id").references(() => academicYears.id).notNull(),
+  classTeacherId: text("class_teacher_id").references(() => users.id),
 });
 
-// 5. Subjects & Courses
+export const students = pgTable("students", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  classId: text("class_id").references(() => classes.id).notNull(),
+});
+
 export const subjects = pgTable("subjects", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  code: varchar("code", { length: 20 }).notNull().unique(), // e.g. "MATH-ADV"
+  id: id(),
+  code: varchar("code", { length: 20 }).notNull().unique(),
   nameUz: varchar("name_uz", { length: 255 }).notNull(),
   nameEn: varchar("name_en", { length: 255 }).notNull(),
-  description: text("description"),
 });
 
-export const courses = pgTable("courses", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  subjectId: uuid("subject_id").references(() => subjects.id, { onDelete: "cascade" }).notNull(),
-  classId: uuid("class_id").references(() => classes.id, { onDelete: "cascade" }).notNull(),
-  teacherId: uuid("teacher_id").references(() => users.id).notNull(),
-  academicYearId: uuid("academic_year_id").references(() => academicYears.id).notNull(),
-});
+// Which teacher teaches which subject to which class. All teacher write
+// permissions are derived from this table.
+export const teacherAssignments = pgTable(
+  "teacher_assignments",
+  {
+    id: id(),
+    teacherId: text("teacher_id").references(() => users.id).notNull(),
+    classId: text("class_id").references(() => classes.id, { onDelete: "cascade" }).notNull(),
+    subjectId: text("subject_id").references(() => subjects.id, { onDelete: "cascade" }).notNull(),
+  },
+  (t) => [unique().on(t.classId, t.subjectId)]
+);
 
-export const enrollments = pgTable("enrollments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  courseId: uuid("course_id").references(() => courses.id, { onDelete: "cascade" }).notNull(),
-  studentId: uuid("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-});
-
-// 6. Timetable Slots
 export const timetableSlots = pgTable("timetable_slots", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  courseId: uuid("course_id").references(() => courses.id, { onDelete: "cascade" }).notNull(),
-  dayOfWeek: integer("day_of_week").notNull(), // 1 = Mon, 5 = Fri
-  startTime: varchar("start_time", { length: 10 }).notNull(), // "08:30"
-  endTime: varchar("end_time", { length: 10 }).notNull(),     // "09:15"
+  id: id(),
+  teacherAssignmentId: text("teacher_assignment_id")
+    .references(() => teacherAssignments.id, { onDelete: "cascade" })
+    .notNull(),
+  dayOfWeek: integer("day_of_week").notNull(), // 1 = Mon .. 5 = Fri
+  startTime: varchar("start_time", { length: 10 }).notNull(),
+  endTime: varchar("end_time", { length: 10 }).notNull(),
   room: varchar("room", { length: 50 }).notNull(),
 });
 
-// 7. Assignments & Submissions
+// ---------------------------------------------------------------------------
+// Assignments (coursework with submissions) — pre-existing feature
+// ---------------------------------------------------------------------------
+
 export const assignments = pgTable("assignments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  courseId: uuid("course_id").references(() => courses.id, { onDelete: "cascade" }).notNull(),
-  teacherId: uuid("teacher_id").references(() => users.id).notNull(),
+  id: id(),
+  teacherAssignmentId: text("teacher_assignment_id")
+    .references(() => teacherAssignments.id, { onDelete: "cascade" })
+    .notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   instructions: text("instructions").notNull(),
   dueDate: timestamp("due_date").notNull(),
   estimatedMinutes: integer("estimated_minutes").default(45).notNull(),
-  rubricJson: jsonb("rubric_json"),
-  status: varchar("status", { length: 20 }).default("published").notNull(), // draft, published, closed
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  status: varchar("status", { length: 20 }).default("published").notNull(),
+  createdAt: createdAt(),
 });
 
-export const submissions = pgTable("submissions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  assignmentId: uuid("assignment_id").references(() => assignments.id, { onDelete: "cascade" }).notNull(),
-  studentId: uuid("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+export const submissions = pgTable(
+  "submissions",
+  {
+    id: id(),
+    assignmentId: text("assignment_id").references(() => assignments.id, { onDelete: "cascade" }).notNull(),
+    studentId: text("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    content: text("content").notNull(),
+    submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+    grade: integer("grade"),
+    maxScore: integer("max_score").default(100).notNull(),
+    feedback: text("feedback"),
+    status: varchar("status", { length: 20 }).default("submitted").notNull(),
+  },
+  (t) => [unique().on(t.assignmentId, t.studentId)]
+);
+
+// ---------------------------------------------------------------------------
+// Assessments & marks (M2 builds the UI on top of these)
+// ---------------------------------------------------------------------------
+
+export const assessments = pgTable("assessments", {
+  id: id(),
+  teacherAssignmentId: text("teacher_assignment_id")
+    .references(() => teacherAssignments.id, { onDelete: "cascade" })
+    .notNull(),
+  termId: text("term_id").references(() => terms.id).notNull(),
+  type: varchar("type", { length: 20 }).notNull(), // quiz | test | homework_check | exam
+  title: varchar("title", { length: 255 }).notNull(),
+  date: varchar("date", { length: 10 }).notNull(),
+  maxScore: integer("max_score").notNull(),
+});
+
+export const marks = pgTable(
+  "marks",
+  {
+    id: id(),
+    assessmentId: text("assessment_id").references(() => assessments.id, { onDelete: "cascade" }).notNull(),
+    studentId: text("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    score: integer("score").notNull(),
+    comment: text("comment"),
+    updatedBy: text("updated_by").references(() => users.id).notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [unique().on(t.assessmentId, t.studentId)]
+);
+
+// ---------------------------------------------------------------------------
+// Attendance (per timetable slot and date)
+// ---------------------------------------------------------------------------
+
+export const attendance = pgTable(
+  "attendance",
+  {
+    id: id(),
+    slotId: text("slot_id").references(() => timetableSlots.id, { onDelete: "cascade" }).notNull(),
+    studentId: text("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+    date: varchar("date", { length: 10 }).notNull(), // YYYY-MM-DD
+    status: varchar("status", { length: 20 }).notNull(), // present | absent | late | excused
+    notes: text("notes"),
+    recordedBy: text("recorded_by").references(() => users.id).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.slotId, t.studentId, t.date)]
+);
+
+export const auditLog = pgTable("audit_log", {
+  id: id(),
+  userId: text("user_id").references(() => users.id),
+  action: varchar("action", { length: 100 }).notNull(),
+  entity: varchar("entity", { length: 50 }).notNull(),
+  entityId: varchar("entity_id", { length: 100 }).notNull(),
+  oldValue: jsonb("old_value"),
+  newValue: jsonb("new_value"),
+  createdAt: createdAt(),
+});
+
+// ---------------------------------------------------------------------------
+// Announcements (in scope) and out-of-scope modules (hidden by FEATURES)
+// ---------------------------------------------------------------------------
+
+export const announcements = pgTable("announcements", {
+  id: id(),
+  authorId: text("author_id").references(() => users.id),
+  authorName: varchar("author_name", { length: 255 }).notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
   content: text("content").notNull(),
-  attachmentUrl: text("attachment_url"),
-  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
-  grade: integer("grade"), // e.g. 95 out of 100
-  maxScore: integer("max_score").default(100).notNull(),
-  feedback: text("feedback"),
-  status: varchar("status", { length: 20 }).default("submitted").notNull(), // submitted, graded, late
+  targetAudience: varchar("target_audience", { length: 50 }).default("all").notNull(),
+  priority: varchar("priority", { length: 20 }).default("normal").notNull(),
+  createdAt: createdAt(),
 });
 
-// 8. Attendance
-export const attendanceRecords = pgTable("attendance_records", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  slotId: uuid("slot_id").references(() => timetableSlots.id).notNull(),
-  studentId: uuid("student_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  date: varchar("date", { length: 20 }).notNull(), // "YYYY-MM-DD"
-  status: varchar("status", { length: 20 }).notNull(), // present, absent, late, excused
-  notes: text("notes"),
-  markedBy: uuid("marked_by").references(() => users.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// 9. Truly Anonymous Suggestions Subsystem (Zero User Mapping)
+// NO user_id / student_id / ip columns, by design.
 export const anonymousSuggestions = pgTable("anonymous_suggestions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  receiptCode: varchar("receipt_code", { length: 50 }).notNull().unique(), // e.g. "NPS-7K9W2B4X"
-  secretHash: text("secret_hash").notNull(), // SHA-256 verifier
+  id: id(),
+  receiptCode: varchar("receipt_code", { length: 50 }).notNull().unique(),
+  secretHash: text("secret_hash").notNull(),
   category: varchar("category", { length: 50 }).notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   content: text("content").notNull(),
-  status: varchar("status", { length: 30 }).default("received").notNull(), // received, under_review, approved, denied, in_progress, implemented, closed
+  status: varchar("status", { length: 30 }).default("received").notNull(),
   officialResponse: text("official_response"),
   respondedAt: timestamp("responded_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  createdAt: createdAt(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  // CRITICAL SECURITY PROPERTY: NO user_id, NO student_id, NO author_ip, NO email!
 });
 
-// 10. Announcements
-export const announcements = pgTable("announcements", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  authorId: uuid("author_id").references(() => users.id).notNull(),
-  title: varchar("title", { length: 255 }).notNull(),
-  content: text("content").notNull(),
-  targetAudience: varchar("target_audience", { length: 50 }).default("all").notNull(), // all, staff, class, students
-  priority: varchar("priority", { length: 20 }).default("normal").notNull(), // urgent, normal, info
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// 11. School Policies & Rules
 export const policies = pgTable("policies", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: id(),
   title: varchar("title", { length: 255 }).notNull(),
-  category: varchar("category", { length: 50 }).notNull(), // handbook, academic, behavior, it, facilities
+  category: varchar("category", { length: 50 }).notNull(),
   content: text("content").notNull(),
   version: varchar("version", { length: 20 }).default("1.0").notNull(),
   effectiveDate: varchar("effective_date", { length: 30 }).notNull(),
-  isArchived: boolean("is_archived").default(false).notNull(),
 });
 
-// 12. Events & Registrations
 export const events = pgTable("events", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: id(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description").notNull(),
   date: varchar("date", { length: 30 }).notNull(),
@@ -172,17 +260,8 @@ export const events = pgTable("events", {
   registeredCount: integer("registered_count").default(0).notNull(),
 });
 
-export const eventRegistrations = pgTable("event_registrations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  eventId: uuid("event_id").references(() => events.id, { onDelete: "cascade" }).notNull(),
-  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
-  status: varchar("status", { length: 20 }).default("registered").notNull(),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// 13. Clubs
 export const clubs = pgTable("clubs", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: id(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description").notNull(),
   leaderName: varchar("leader_name", { length: 255 }).notNull(),
@@ -190,40 +269,26 @@ export const clubs = pgTable("clubs", {
   memberCount: integer("member_count").default(0).notNull(),
 });
 
-// 14. Student Projects & Mentorship
 export const studentProjects = pgTable("student_projects", {
-  id: uuid("id").primaryKey().defaultRandom(),
+  id: id(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description").notNull(),
   category: varchar("category", { length: 50 }).notNull(),
-  status: varchar("status", { length: 30 }).default("active").notNull(), // proposed, active, completed
-  leadStudentId: uuid("lead_student_id").references(() => users.id).notNull(),
+  status: varchar("status", { length: 30 }).default("active").notNull(),
+  leadStudentId: text("lead_student_id").references(() => users.id),
+  leadStudentName: varchar("lead_student_name", { length: 255 }).notNull(),
   mentorName: varchar("mentor_name", { length: 255 }).notNull(),
-  milestonesJson: jsonb("milestones_json"),
+  milestones: jsonb("milestones").$type<{ title: string; done: boolean }[]>().notNull(),
 });
 
-// 15. Facilities & IT Support Tickets
 export const supportTickets = pgTable("support_tickets", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  reporterId: uuid("reporter_id").references(() => users.id).notNull(),
-  category: varchar("category", { length: 50 }).notNull(), // it, facilities, smartboard
+  id: id(),
+  reporterId: text("reporter_id").references(() => users.id),
+  reporterName: varchar("reporter_name", { length: 255 }).notNull(),
+  category: varchar("category", { length: 50 }).notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   description: text("description").notNull(),
   priority: varchar("priority", { length: 20 }).default("medium").notNull(),
-  status: varchar("status", { length: 30 }).default("open").notNull(), // open, in_progress, resolved, closed
-  assignedTo: varchar("assigned_to", { length: 255 }),
-  resolutionNotes: text("resolution_notes"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
-
-// 16. Audit Logs
-export const auditLogs = pgTable("audit_logs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  actorId: uuid("actor_id"),
-  actorRole: varchar("actor_role", { length: 50 }).notNull(),
-  action: varchar("action", { length: 100 }).notNull(),
-  entityType: varchar("entity_type", { length: 50 }).notNull(),
-  entityId: varchar("entity_id", { length: 100 }).notNull(),
-  details: text("details"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+  status: varchar("status", { length: 30 }).default("open").notNull(),
+  createdAt: createdAt(),
 });

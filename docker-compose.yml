@@ -34,9 +34,12 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-namps_user}:${POSTGRES_PASSWORD:-namps_secure_password_2026}@db:5432/${POSTGRES_DB:-namps_os}
-      JWT_SECRET: ${JWT_SECRET:-production-jwt-secret-min-32-chars-long}
-      ANONYMOUS_PEPPER: ${ANONYMOUS_PEPPER:-production-anonymous-pepper-salt}
-      NEXT_PUBLIC_DEMO_MODE: ${NEXT_PUBLIC_DEMO_MODE:-false}
+      # No defaults for secrets: compose refuses to start without them (fail closed).
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET (>= 32 random chars)}
+      ANONYMOUS_PEPPER: ${ANONYMOUS_PEPPER:?set ANONYMOUS_PEPPER (>= 16 random chars)}
+      MIGRATE_ON_START: "true"
+      DEMO_MODE: ${DEMO_MODE:-false}
+      FEATURES: ${FEATURES:-}
     ports:
       - "3000:3000"
     networks:

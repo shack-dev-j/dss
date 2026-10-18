@@ -1,2 +1,4 @@
 allowBuilds:
   esbuild: true
+  # optional native resolver for eslint-plugin-import; has a JS/WASM fallback, so no install script needed
+  unrs-resolver: false

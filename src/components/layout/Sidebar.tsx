@@ -31,7 +31,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
-  const { role } = useAuth();
+  const { role, hasTab } = useAuth();
   const { t } = useI18n();
 
   // Role-specific navigation definitions
@@ -63,25 +63,17 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
           { id: "policies", label: t.nav.knowledgeBase, icon: FileText },
         ];
 
-      case "director":
+      case "admin":
         return [
-          { id: "dashboard", label: "Direktor boshqaruvi", icon: LayoutDashboard },
+          { id: "dashboard", label: "Administrator paneli", icon: LayoutDashboard },
           { id: "suggestions-review", label: "Anonim takliflar (Ko'rib chiqish)", icon: MessageSquareLock },
+          { id: "users", label: t.nav.userManagement, icon: UserCog },
           { id: "analytics", label: t.nav.analytics, icon: BarChart3 },
+          { id: "csv-import", label: t.common.importCsv + " (Maktab ko'chirish)", icon: UploadCloud },
+          { id: "timetable", label: "Dars jadvallarini boshqarish", icon: CalendarDays },
           { id: "announcements", label: t.nav.announcements, icon: Bell },
           { id: "policies", label: t.nav.knowledgeBase, icon: FileText },
           { id: "facilities", label: t.nav.facilities, icon: Wrench },
-        ];
-
-      case "manager":
-        return [
-          { id: "dashboard", label: "Menejer boshqaruvi", icon: LayoutDashboard },
-          { id: "csv-import", label: t.common.importCsv + " (Maktab ko'chirish)", icon: UploadCloud },
-          { id: "suggestions-review", label: "Murojaatlarni boshqarish", icon: MessageSquareLock },
-          { id: "timetable", label: "Dars jadvallarini boshqarish", icon: CalendarDays },
-          { id: "users", label: t.nav.userManagement, icon: UserCog },
-          { id: "announcements", label: t.nav.announcements, icon: Bell },
-          { id: "policies", label: t.nav.knowledgeBase, icon: FileText },
         ];
 
       case "parent":
@@ -102,7 +94,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
     }
   };
 
-  const navItems = getNavItems();
+  const navItems = [...getNavItems(), { id: "account", label: t.auth.account, icon: UserCog }].filter((item) => hasTab(item.id));
 
   return (
     <aside className="w-64 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 min-h-[calc(100vh-4rem)] p-4 flex flex-col justify-between hidden md:flex">
@@ -133,6 +125,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
       </div>
 
       {/* Anonymous Suggestions Highlight Pill */}
+      {hasTab("suggestions") ? (
       <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/60 text-xs">
         <div className="flex items-center space-x-2 text-slate-800 dark:text-slate-200 font-semibold">
           <MessageSquareLock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -148,6 +141,7 @@ export function Sidebar({ activeTab, setActiveTab }: SidebarProps) {
           <span>Anonim taklif yuborish &rarr;</span>
         </button>
       </div>
+      ) : <div />}
     </aside>
   );
 }

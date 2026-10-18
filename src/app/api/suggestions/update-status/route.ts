@@ -1,29 +1,23 @@
 import { NextResponse } from "next/server";
+import { badRequest, notFound, readJson, withAuth } from "@/lib/authz";
 import { db } from "@/db";
-import { UserRole, SuggestionStatus } from "@/types";
+import { SuggestionStatus } from "@/types";
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const { id, status, officialResponse, role } = body;
+const STATUSES: SuggestionStatus[] = ["received", "under_review", "approved", "denied", "in_progress", "implemented", "closed"];
 
-    if (!id || !status || !role) {
-      return NextResponse.json({ error: "Missing required parameters." }, { status: 400 });
+export const POST = withAuth(
+  async (req) => {
+    const body = await readJson(req);
+    const status = STATUSES.find((s) => s === body.status);
+    if (typeof body.id !== "string" || !status) throw badRequest("Missing or invalid parameters.");
+    try {
+      const updated = await db.updateAnonymousSuggestionStatus(
+        body.id, status, typeof body.officialResponse === "string" ? body.officialResponse : undefined
+      );
+      return NextResponse.json({ suggestion: updated });
+    } catch {
+      throw notFound("Suggestion not found");
     }
-
-    if (role !== "director" && role !== "manager") {
-      return NextResponse.json({ error: "Access denied." }, { status: 403 });
-    }
-
-    const updated = await db.updateAnonymousSuggestionStatus(
-      id,
-      status as SuggestionStatus,
-      officialResponse,
-      role as UserRole
-    );
-
-    return NextResponse.json({ suggestion: updated }, { status: 200 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || "Failed to update suggestion" }, { status: 500 });
-  }
-}
+  },
+  { feature: "suggestions", roles: ["admin"] }
+);

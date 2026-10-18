@@ -1,33 +1,22 @@
 import { NextResponse } from "next/server";
+import { badRequest, readJson, withAuth } from "@/lib/authz";
 import { db } from "@/db";
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const { category, title, content } = body;
+const CATEGORIES = ["academic", "facilities", "catering", "events", "general"] as const;
 
-    if (!category || !title || !content) {
-      return NextResponse.json(
-        { error: "Category, title, and content are required." },
-        { status: 400 }
-      );
+// Requires a login (so the route is not open to the internet) but the user is
+// deliberately NOT passed to the repository: nothing identifying is stored or logged.
+export const POST = withAuth(
+  async (req) => {
+    const body = await readJson(req);
+    const category = CATEGORIES.find((c) => c === body.category);
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const content = typeof body.content === "string" ? body.content.trim() : "";
+    if (!category || !title || !content) throw badRequest("Category, title, and content are required.");
+    if (title.length < 3 || content.length < 10) {
+      throw badRequest("Title must be at least 3 characters and content at least 10 characters.");
     }
-
-    if (title.trim().length < 3 || content.trim().length < 10) {
-      return NextResponse.json(
-        { error: "Title must be at least 3 characters and content at least 10 characters." },
-        { status: 400 }
-      );
-    }
-
-    // Submit anonymously: ZERO user identity, zero IP address, zero cookie linkage
-    const result = await db.submitAnonymousSuggestion(category, title.trim(), content.trim());
-
-    return NextResponse.json(result, { status: 201 });
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Failed to submit anonymous suggestion." },
-      { status: 500 }
-    );
-  }
-}
+    return NextResponse.json(await db.submitAnonymousSuggestion(category, title, content), { status: 201 });
+  },
+  { feature: "suggestions" }
+);

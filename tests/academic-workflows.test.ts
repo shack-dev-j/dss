@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { db } from "@/db";
+import { setupDb, resetDb } from "./helpers";
 
 describe("Academic & Operational Workflows Integration", () => {
-  beforeEach(() => {
-    db.resetDemoData();
-  });
+  beforeAll(setupDb);
+  beforeEach(resetDb);
 
   it("retrieves personal timetable for a Grade 10-A student in Asia/Tashkent timezone", async () => {
     const slots = await db.getTimetableForStudent(10, "A");
@@ -18,15 +18,10 @@ describe("Academic & Operational Workflows Integration", () => {
     // 1. Teacher creates assignment
     const newAsg = await db.createAssignment({
       courseId: "crs-10a-math",
-      subjectName: "Kengaytirilgan Matematika",
-      teacherId: "usr-tch-01",
-      teacherName: "Jasur Rahimov",
       title: "Integrallar va hosilalar amaliyoti",
       instructions: "Hosilalar formulalarini isbotlang.",
       dueDate: "2026-11-01T23:59:00",
       estimatedMinutes: 60,
-      gradeLevel: 10,
-      section: "A",
     });
 
     expect(newAsg.id).toBeDefined();
@@ -36,7 +31,6 @@ describe("Academic & Operational Workflows Integration", () => {
     const submission = await db.submitAssignment(
       newAsg.id,
       "usr-stu-01",
-      "Azamat Toirov",
       "Yechimlar to'liq daftarga yozildi va havola biriktirildi."
     );
 
@@ -61,19 +55,17 @@ describe("Academic & Operational Workflows Integration", () => {
       {
         slotId: "slot-01",
         studentId: "usr-stu-01",
-        studentName: "Azamat Toirov",
         date: today,
         status: "present",
       },
       {
         slotId: "slot-01",
         studentId: "usr-stu-02",
-        studentName: "Madina Zaripova",
         date: today,
         status: "late",
         notes: "Transport kechikishi tufayli 5 daqiqa kech qoldi",
       },
-    ]);
+    ], "usr-tch-01");
 
     const records = await db.getAttendanceForSlotAndDate("slot-01", today);
     expect(records.length).toBe(2);
@@ -83,12 +75,12 @@ describe("Academic & Operational Workflows Integration", () => {
   it("resets demo state back to pristine fictional data without data loss", async () => {
     // Submit a new suggestion
     await db.submitAnonymousSuggestion("general", "Test taklif", "Test matni");
-    const beforeReset = await db.getAllAnonymousSuggestions("director");
+    const beforeReset = await db.getAllAnonymousSuggestions();
     expect(beforeReset.length).toBeGreaterThan(2);
 
     // Reset demo state
-    db.resetDemoData();
-    const afterReset = await db.getAllAnonymousSuggestions("director");
+    await db.resetDemoData();
+    const afterReset = await db.getAllAnonymousSuggestions();
     expect(afterReset.length).toBe(2); // Initial seed count
   });
 });

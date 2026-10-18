@@ -5,6 +5,8 @@ const nextConfig: NextConfig = {
   output: process.env.OUTPUT_STANDALONE === "true" ? "standalone" : undefined,
   reactStrictMode: true,
   poweredByHeader: false,
+  // PGlite ships WASM + data files that must not be bundled (local dev / demo database).
+  serverExternalPackages: ["@electric-sql/pglite"],
 };
 
 export default nextConfig;

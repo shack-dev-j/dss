@@ -1,41 +1,54 @@
 import { NextResponse } from "next/server";
+import { assertCanSeeStudent, assertTeachesSlot, badRequest, forbidden, readJson, withAuth } from "@/lib/authz";
 import { db } from "@/db";
 
-export async function GET(req: Request) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const studentId = searchParams.get("studentId");
-    const slotId = searchParams.get("slotId");
-    const date = searchParams.get("date");
+const STATUSES = ["present", "absent", "late", "excused"];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-    if (studentId) {
-      const records = await db.getAttendanceForStudent(studentId);
-      return NextResponse.json({ records }, { status: 200 });
-    }
+export const GET = withAuth(async (req, user) => {
+  const sp = new URL(req.url).searchParams;
+  const studentId = sp.get("studentId");
+  const slotId = sp.get("slotId");
+  const date = sp.get("date");
 
-    if (slotId && date) {
-      const records = await db.getAttendanceForSlotAndDate(slotId, date);
-      return NextResponse.json({ records }, { status: 200 });
-    }
-
-    return NextResponse.json({ records: [] }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch attendance" }, { status: 500 });
+  if (studentId) {
+    await assertCanSeeStudent(user, studentId);
+    return NextResponse.json({ records: await db.getAttendanceForStudent(studentId) });
   }
-}
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const { records } = body;
-
-    if (!Array.isArray(records)) {
-      return NextResponse.json({ error: "Records array required" }, { status: 400 });
-    }
-
-    await db.markAttendance(records);
-    return NextResponse.json({ success: true }, { status: 200 });
-  } catch (error) {
-    return NextResponse.json({ error: "Failed to mark attendance" }, { status: 500 });
+  if (slotId && date) {
+    if (user.role === "student" || user.role === "parent") throw forbidden();
+    await assertTeachesSlot(user, slotId);
+    return NextResponse.json({ records: await db.getAttendanceForSlotAndDate(slotId, date) });
   }
-}
+  // No filter: students get their own history, everyone else gets nothing.
+  if (user.role === "student") return NextResponse.json({ records: await db.getAttendanceForStudent(user.id) });
+  return NextResponse.json({ records: [] });
+});
+
+export const POST = withAuth(
+  async (req, user) => {
+    const body = await readJson(req);
+    const records = body.records;
+    if (!Array.isArray(records) || records.length === 0) throw badRequest("Records array required");
+
+    // Validate every record and every teacher/slot relationship BEFORE writing anything.
+    const classMembers = new Map<string, Set<string>>();
+    const clean: Array<{ slotId: string; studentId: string; date: string; status: string; notes?: string }> = [];
+    for (const r of records as Record<string, unknown>[]) {
+      const slotId = String(r.slotId ?? "");
+      const studentId = String(r.studentId ?? "");
+      const date = String(r.date ?? "");
+      const status = String(r.status ?? "");
+      if (!slotId || !studentId || !DATE_RE.test(date) || !STATUSES.includes(status)) {
+        throw badRequest("Each record needs slotId, studentId, date (YYYY-MM-DD) and a valid status");
+      }
+      const { ta } = await assertTeachesSlot(user, slotId);
+      if (!classMembers.has(ta.classId)) classMembers.set(ta.classId, new Set(await db.getStudentIdsInClass(ta.classId)));
+      if (!classMembers.get(ta.classId)!.has(studentId)) throw badRequest("Student is not in this class");
+      clean.push({ slotId, studentId, date, status, notes: typeof r.notes === "string" ? r.notes : undefined });
+    }
+    await db.markAttendance(clean, user.id);
+    return NextResponse.json({ success: true });
+  },
+  { roles: ["admin", "teacher"] }
+);

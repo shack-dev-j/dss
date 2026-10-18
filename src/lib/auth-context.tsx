@@ -1,89 +1,86 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { UserSession, UserRole } from "@/types";
+import { TAB_FEATURE } from "@/lib/features";
 
 interface AuthContextType {
   user: UserSession | null;
   role: UserRole;
-  switchRole: (role: UserRole) => void;
-  signOut: () => void;
   isLoading: boolean;
+  demoMode: boolean;
+  features: string[];
+  /** True if the tab/module is available (its FEATURES flag is on, or it has none). */
+  hasTab: (tab: string) => boolean;
+  signIn: (username: string, password: string) => Promise<string | null>;
+  signOut: () => Promise<void>;
+  /** Demo mode only: start a real server session as the seeded demo user of that role. */
+  switchRole: (role: UserRole) => Promise<void>;
 }
-
-const DEMO_ACCOUNTS: Record<UserRole, UserSession> = {
-  director: {
-    id: "usr-dir-01",
-    email: "director@namps.uz",
-    fullName: "Dilshodbek Rustamov",
-    role: "director",
-  },
-  manager: {
-    id: "usr-mgr-01",
-    email: "manager@namps.uz",
-    fullName: "Nodira Karimova",
-    role: "manager",
-  },
-  teacher: {
-    id: "usr-tch-01",
-    email: "jasur.rahimov@namps.uz",
-    fullName: "Jasur Rahimov",
-    role: "teacher",
-  },
-  student: {
-    id: "usr-stu-01",
-    email: "azamat.toirov@student.namps.uz",
-    fullName: "Azamat Toirov",
-    role: "student",
-    gradeLevel: 10,
-    section: "A",
-  },
-  parent: {
-    id: "usr-par-01",
-    email: "farhod.toirov@parent.uz",
-    fullName: "Farhod Toirov",
-    role: "parent",
-    childrenIds: ["usr-stu-01"],
-  },
-  librarian: {
-    id: "usr-lib-01",
-    email: "librarian@namps.uz",
-    fullName: "Shahnoza Sobirova",
-    role: "librarian",
-  },
-  staff: {
-    id: "usr-stf-01",
-    email: "staff@namps.uz",
-    fullName: "Mansur Jo'rayev",
-    role: "staff",
-  },
-};
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Default demo role is student
-  const [user, setUser] = useState<UserSession | null>(DEMO_ACCOUNTS.student);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<UserSession | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
+  const [features, setFeatures] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const savedRole = localStorage.getItem("namps_demo_role") as UserRole;
-    if (savedRole && DEMO_ACCOUNTS[savedRole]) {
-      setUser(DEMO_ACCOUNTS[savedRole]);
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me");
+      const data = await res.json();
+      setDemoMode(!!data.demoMode);
+      if (res.ok) {
+        setUser(data.user);
+        setFeatures(data.features || []);
+      } else {
+        setUser(null);
+        setFeatures([]);
+      }
+    } catch {
+      setUser(null);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   }, []);
 
-  const switchRole = (newRole: UserRole) => {
-    if (DEMO_ACCOUNTS[newRole]) {
-      setUser(DEMO_ACCOUNTS[newRole]);
-      localStorage.setItem("namps_demo_role", newRole);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const signIn = async (username: string, password: string) => {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return (data.error as string) || "Login failed";
     }
+    await refresh();
+    return null;
   };
 
-  const signOut = () => {
+  const signOut = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     setUser(null);
-    localStorage.removeItem("namps_demo_role");
+    setFeatures([]);
+  };
+
+  const switchRole = async (newRole: UserRole) => {
+    await fetch("/api/auth/demo-login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    await refresh();
+  };
+
+  const hasTab = (tab: string) => {
+    const feature = TAB_FEATURE[tab];
+    return !feature || features.includes(feature);
   };
 
   return (
@@ -91,9 +88,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         role: user ? user.role : "student",
-        switchRole,
-        signOut,
         isLoading,
+        demoMode,
+        features,
+        hasTab,
+        signIn,
+        signOut,
+        switchRole,
       }}
     >
       {children}
